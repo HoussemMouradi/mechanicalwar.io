@@ -4,20 +4,23 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
 <title>mechanical war.io</title>
-<meta name="description" content="Office FPS with corrected first-person weapon position">
+<meta name="description" content="Office FPS with forward-oriented first-person gun">
 <style>
-html,body{margin:0;height:100%;background:#07101d;color:#eaf2ff;font-family:system-ui,Segoe UI,Arial;display:grid;place-items:center} .card{max-width:720px;margin:20px;padding:22px;border:1px solid #ffffff26;border-radius:22px;background:#0f172af5;box-shadow:0 25px 80px #000a}.title{font-size:clamp(32px,8vw,56px);margin:0 0 8px;font-weight:950;text-transform:uppercase;background:linear-gradient(90deg,#fff,#fbbf24,#38bdf8);-webkit-background-clip:text;color:transparent}.small{color:#94a3b8}.err{color:#fca5a5;white-space:pre-wrap}</style>
+html,body{margin:0;height:100%;background:#07101d;color:#eaf2ff;font-family:system-ui,Segoe UI,Arial;display:grid;place-items:center}.card{max-width:720px;margin:20px;padding:22px;border:1px solid #ffffff26;border-radius:22px;background:#0f172af5;box-shadow:0 25px 80px #000a}.title{font-size:clamp(32px,8vw,56px);margin:0 0 8px;font-weight:950;text-transform:uppercase;background:linear-gradient(90deg,#fff,#fbbf24,#38bdf8);-webkit-background-clip:text;color:transparent}.small{color:#94a3b8}.err{color:#fca5a5;white-space:pre-wrap}</style>
 </head>
 <body>
-<div class="card" id="loading"><h1 class="title">mechanical war.io</h1><p class="small">Loading corrected first-person weapon view...</p></div>
+<div class="card" id="loading"><h1 class="title">mechanical war.io</h1><p class="small">Loading forward-oriented weapon view...</p></div>
 <script>
 (async()=>{
   const raw='https://raw.githubusercontent.com/HoussemMouradi/mechanicalwar.io/707e0a6fb3fae73380d3efdbfcc49fe52d07cee9/index.html';
   let t=await fetch(raw,{cache:'no-store'}).then(r=>{if(!r.ok)throw new Error('Could not load game build: '+r.status);return r.text()});
-  t=t.replace("Office FPS with reliable gun pickup and live player list","Office FPS with reliable gun pickup and corrected first-person weapon position");
-  t=t.replace("Office FPS · reliable E pickup · live room list","Office FPS · reliable E pickup · corrected weapon view");
-  t=t.replace("ROOM='mechanical-war-office-guns-v5'","ROOM='mechanical-war-office-guns-v6'");
-  t=t.replace("m.scale.set(.65,.65,.65);m.position.set(.28,-.22,-.62);m.rotation.set(.12,.2,0);hand.add(m)","m.scale.set(.28,.28,.28);m.position.set(.38,-.36,-.86);m.rotation.set(-.04,Math.PI/2,-.08);m.traverse(o=>{if(o.isMesh){o.frustumCulled=false;o.renderOrder=10}});hand.add(m)");
+  t=t.replace("Office FPS with reliable gun pickup and live player list","Office FPS with reliable pickup and forward-oriented first-person weapon");
+  t=t.replace("Office FPS · reliable E pickup · live room list","Office FPS · reliable E pickup · forward gun view");
+  t=t.replace("ROOM='mechanical-war-office-guns-v5'","ROOM='mechanical-war-office-guns-v8'");
+  const old="function drawHand(){if(!hand)return;while(hand.children.length)hand.remove(hand.children[0]);if(!me.gun)return;let m=gunMesh(me.gun);m.scale.set(.65,.65,.65);m.position.set(.28,-.22,-.62);m.rotation.set(.12,.2,0);hand.add(m)}";
+  const fixed="function fpGunMesh(t){let d=GUN[t],g=new THREE.Group(),mm=mat(d.c,.35,.55);let body=new THREE.Mesh(new THREE.BoxGeometry(.18,.12,.62),mm);body.position.set(0,0,-.34);g.add(body);let barrel=new THREE.Mesh(new THREE.CylinderGeometry(.028,.028,.55,12),mm);barrel.rotation.x=Math.PI/2;barrel.position.set(0,.015,-.82);g.add(barrel);let grip=new THREE.Mesh(new THREE.BoxGeometry(.14,.34,.16),mm);grip.position.set(-.03,-.22,-.1);grip.rotation.x=-.25;g.add(grip);if(t==='rifle'||t==='smg'){let stock=new THREE.Mesh(new THREE.BoxGeometry(.18,.12,.26),mm);stock.position.set(0,.02,.08);g.add(stock)}if(t==='shotgun'){let pump=new THREE.Mesh(new THREE.BoxGeometry(.2,.09,.28),mat(0x8b5a2b));pump.position.set(0,-.04,-.55);g.add(pump)}g.traverse(o=>{if(o.isMesh){o.castShadow=o.receiveShadow=true;o.frustumCulled=false;o.renderOrder=10}});return g}function drawHand(){if(!hand)return;while(hand.children.length)hand.remove(hand.children[0]);if(!me.gun)return;let m=fpGunMesh(me.gun);m.scale.set(.55,.55,.55);m.position.set(.34,-.34,-.58);m.rotation.set(-.03,.04,-.05);hand.add(m)}";
+  if(!t.includes(old)) throw new Error('Weapon transform patch target not found.');
+  t=t.replace(old,fixed);
   document.open();document.write(t);document.close();
 })().catch(e=>{document.getElementById('loading').innerHTML='<h1 class="title">mechanical war.io</h1><p class="err">Failed to load game build. Refresh the page.\n'+String(e.message||e)+'</p>'});
 </script>
