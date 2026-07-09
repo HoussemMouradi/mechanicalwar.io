@@ -12,4 +12,10 @@ for (const source of scripts) {
   new vm.Script(source);
 }
 
+for (const weapon of ['ak47', 'm4', 'rpg', 'knife']) {
+  if (!html.includes(`${weapon}:{`)) {
+    throw new Error(`Missing weapon definition: ${weapon}`);
+  }
+}
+
 console.log(`Validated ${scripts.length} inline script block.`);
