@@ -22,12 +22,28 @@ test.beforeEach(async ({ page }) => {
 test('loads the menu without script errors', async ({ page }) => {
   const errors = [];
   page.on('pageerror', error => errors.push(error.message));
+  page.on('console', message => {
+    if (message.type() === 'error') errors.push(message.text());
+  });
 
   await page.goto('/');
   await expect(page.locator('#menu')).toBeVisible();
   await expect(page.locator('.title')).toHaveText('mechanical war.io');
   await expect(page.locator('#enter')).toBeVisible();
+  await expect(page.locator('.feature-strip')).toContainText('8 DISTINCT WEAPONS');
   expect(errors).toEqual([]);
+});
+
+test('offers responsive touch controls and all distinct weapons', async ({ page }) => {
+  await page.goto('/');
+  const weapons = await page.evaluate(() => Object.fromEntries(
+    ['pistol', 'smg', 'shotgun', 'rifle', 'ak47', 'm4', 'rpg', 'knife']
+      .map(key => [key, { name: GUN[key]?.n, damage: GUN[key]?.d, reload: GUN[key]?.reload }])
+  ));
+  expect(Object.keys(weapons)).toHaveLength(8);
+  expect(new Set(Object.values(weapons).map(weapon => weapon.name)).size).toBe(8);
+  await expect(page.locator('#mobileControls')).toHaveCount(1);
+  await expect(page.locator('.mobile-action.fire')).toHaveText('FIRE');
 });
 
 test('enters a rendered office scene with the mocked host', async ({ page }) => {
@@ -53,6 +69,10 @@ test('enters a rendered office scene with the mocked host', async ({ page }) => 
   });
   expect(canvasSize.width).toBeGreaterThan(1000);
   expect(canvasSize.height).toBeGreaterThan(600);
+  const world = await page.evaluate(() => ({ obstacles: obs.length, guns: guns.length, farSpawn: Math.abs(spawn(2).x) }));
+  expect(world.obstacles).toBeGreaterThan(30);
+  expect(world.guns).toBeGreaterThanOrEqual(16);
+  expect(world.farSpawn).toBeGreaterThan(33);
   expect(errors).toEqual([]);
 });
 
