@@ -125,6 +125,32 @@ test('enters a rendered office scene with the mocked host', async ({ page }) => 
   expect(errors).toEqual([]);
 });
 
+test('first-person weapon points forward toward the crosshair', async ({ page }) => {
+  await page.goto('/');
+  await page.locator('#name').fill('Weapon Tester');
+  await page.locator('#team1').click();
+  await page.locator('#enter').click();
+  await expect(page.locator('#loading')).toBeHidden({ timeout: 10000 });
+
+  const orientation = await page.evaluate(() => {
+    me.gun = 'm4';
+    me.ammo = GUN.m4.mag;
+    me.res = GUN.m4.res;
+    drawHand(true);
+    const view = hand.children[0];
+    const model = view.children[0];
+    return {
+      axis: model.userData.forwardAxis,
+      modelYaw: model.rotation.y,
+      viewYaw: view.rotation.y
+    };
+  });
+
+  expect(orientation.axis).toBe('-z');
+  expect(orientation.modelYaw).toBeCloseTo(Math.PI / 2, 5);
+  expect(Math.abs(orientation.viewYaw)).toBeLessThan(0.25);
+});
+
 test('respawns in the same room after elimination', async ({ page }) => {
   const errors = [];
   page.on('pageerror', error => errors.push(error.message));

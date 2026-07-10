@@ -72,7 +72,7 @@ gunMesh=function(type){
   else{const long=type!=='pistol',len=type==='shotgun'?1.2:long?1.02:.54;part(g,new THREE.BoxGeometry(len,.16,.22),body);const barrel=part(g,new THREE.CylinderGeometry(.035,.035,long?.9:.43,10),accent,len*.75);barrel.rotation.z=Math.PI/2;const grip=part(g,new THREE.BoxGeometry(.14,.35,.18),body,-len*.25,-.22);grip.rotation.z=-.28;if(long)part(g,new THREE.BoxGeometry(.38,.15,.2),type==='ak47'||type==='shotgun'?wood:body,-len*.62);if(type==='ak47'){const mag=part(g,new THREE.BoxGeometry(.22,.38,.16),wood,.02,-.22);mag.rotation.z=.2}if(type==='m4'||type==='rifle')part(g,new THREE.BoxGeometry(.28,.08,.16),accent,.08,.15);if(type==='shotgun')part(g,new THREE.BoxGeometry(.42,.1,.2),wood,.32,-.1)}
   g.traverse(o=>{if(o.isMesh){o.castShadow=!lowPower;o.receiveShadow=true}});return g;
 };
-fpGunMesh=function(type){const g=gunMesh(type);g.rotation.y=-Math.PI/2;g.scale.setScalar(type==='rpg'?.8:type==='knife'?.72:.9);return g};
+fpGunMesh=function(type){const view=new THREE.Group(),model=gunMesh(type);model.rotation.y=Math.PI/2;model.scale.setScalar(type==='rpg'?.8:type==='knife'?.72:.9);model.userData.forwardAxis='-z';view.add(model);return view};
 
 let handWeapon='',handRef=null,reloading=false,reloadToken=0,recoil=0,walkBob=0,lastShotAt=0,audioContext;
 const legacyDrawHand=drawHand;
