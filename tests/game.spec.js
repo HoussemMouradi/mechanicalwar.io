@@ -91,6 +91,7 @@ test('enters a rendered office scene with the mocked host', async ({ page }) => 
     () => page.evaluate(() => !document.getElementById('hud').classList.contains('hide')),
     { timeout: 10000 }
   ).toBe(true);
+  await expect(page.locator('#loading')).toBeHidden();
   await expect(page.locator('canvas')).toHaveCount(1);
   await expect(page.locator('#held')).toHaveText('Unarmed');
 
@@ -101,10 +102,26 @@ test('enters a rendered office scene with the mocked host', async ({ page }) => 
   });
   expect(canvasSize.width).toBeGreaterThan(1000);
   expect(canvasSize.height).toBeGreaterThan(600);
-  const world = await page.evaluate(() => ({ obstacles: obs.length, guns: guns.length, farSpawn: Math.abs(spawn(2).x) }));
+  const world = await page.evaluate(() => ({
+    obstacles: obs.length,
+    guns: guns.length,
+    farSpawn: Math.abs(spawn(2).x),
+    teamOneYaw: spawn(1).yaw,
+    teamTwoYaw: spawn(2).yaw,
+    ambient: scene.children.find(object => object.isAmbientLight)?.intensity,
+    hemisphere: scene.children.find(object => object.isHemisphereLight)?.intensity,
+    fogNear: scene.fog?.near,
+    exposure: renderer.toneMappingExposure
+  }));
   expect(world.obstacles).toBeGreaterThan(30);
   expect(world.guns).toBeGreaterThanOrEqual(16);
   expect(world.farSpawn).toBeGreaterThan(33);
+  expect(world.teamOneYaw).toBeLessThan(0);
+  expect(world.teamTwoYaw).toBeGreaterThan(0);
+  expect(world.ambient).toBeGreaterThanOrEqual(0.7);
+  expect(world.hemisphere).toBeGreaterThanOrEqual(1.7);
+  expect(world.fogNear).toBeGreaterThanOrEqual(75);
+  expect(world.exposure).toBeGreaterThanOrEqual(1.6);
   expect(errors).toEqual([]);
 });
 

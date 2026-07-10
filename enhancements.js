@@ -31,11 +31,11 @@ function enhanceMenu(){
 enhanceMenu();
 
 const legacyStat=stat;
-stat=function(message){legacyStat(message);if(/HOSTING|Joined room|error|failed|no host|already|enter your|choose|rejected|left room/i.test(message))$('loading')?.classList.add('hide')};
+stat=function(message){legacyStat(message);if(/HOSTING|Auto created host|Joined room|Connected|error|failed|no host|already|enter your|choose|rejected|left room/i.test(message))$('loading')?.classList.add('hide')};
 
 const SPAWNS={
-  1:[[-42,-24,1.15],[-42,-8,1.35],[-42,10,1.45],[-40,25,1.7],[-34,30,2.1]],
-  2:[[42,24,-1.99],[42,8,-1.79],[42,-10,-1.69],[40,-25,-1.44],[34,-30,-1.05]]
+  1:[[-42,-24,-1.57],[-42,-8,-1.57],[-42,10,-1.57],[-40,25,-1.57],[-34,30,-1.57]],
+  2:[[42,24,1.57],[42,8,1.57],[42,-10,1.57],[40,-25,1.57],[34,-30,1.57]]
 };
 spawn=function(team){const pool=SPAWNS[team]||SPAWNS[1];let best=pool[Math.random()*pool.length|0],score=-1;for(const s of pool){let nearestEnemy=999;for(const p of players.values())if(p.team&&p.team!==team&&p.hp>0)nearestEnemy=Math.min(nearestEnemy,Math.hypot(s[0]-p.x,s[1]-p.z));if(nearestEnemy>score){score=nearestEnemy;best=s}}return{x:best[0],y:1.7,z:best[1],yaw:best[2]}};
 
@@ -47,19 +47,20 @@ function barrier(x,z,rot=0){const g=new THREE.Group(),base=mat(0x334155,.62,.22)
 function tower(x,z,team){const c=team===1?0x075985:0x9a3412;cover(x,z,5,5,1.1,c);for(const dx of[-2.1,2.1])for(const dz of[-2.1,2.1])box(x+dx,2.1,z+dz,.25,3.2,.25,mat(0x1e293b,.55,.3));box(x,3.65,z,5.2,.22,5.2,mat(0x1e293b,.55,.3),false)}
 
 office=function(){
-  scene.background=new THREE.Color(0x07111d);scene.fog=new THREE.Fog(0x07111d,52,118);
-  scene.add(new THREE.HemisphereLight(0xaad9ff,0x12161c,1.15));
-  const sun=new THREE.DirectionalLight(0xffe5bd,1.8);sun.position.set(-18,34,24);sun.castShadow=!lowPower;sun.shadow.mapSize.set(lowPower?512:1536,lowPower?512:1536);sun.shadow.camera.left=-52;sun.shadow.camera.right=52;sun.shadow.camera.top=40;sun.shadow.camera.bottom=-40;scene.add(sun);
-  const ft=texture('#303843','rgba(148,163,184,.24)',32);ft.repeat.set(18,13);
-  const floor=new THREE.Mesh(new THREE.PlaneGeometry(96,70),mat(0x303843,.82,.05,{map:ft,bumpMap:ft,bumpScale:.025}));floor.rotation.x=-Math.PI/2;floor.receiveShadow=true;scene.add(floor);
-  const wall=mat(0x273449,.68,.18),trim=mat(0x0f172a,.5,.35);
+  scene.background=new THREE.Color(0x7894a9);scene.fog=new THREE.Fog(0x7894a9,76,150);
+  scene.add(new THREE.AmbientLight(0xffffff,.72));
+  scene.add(new THREE.HemisphereLight(0xeaf7ff,0x697586,1.75));
+  const sun=new THREE.DirectionalLight(0xfff1d6,2.35);sun.position.set(-18,34,24);sun.castShadow=!lowPower;sun.shadow.mapSize.set(lowPower?512:1536,lowPower?512:1536);sun.shadow.camera.left=-52;sun.shadow.camera.right=52;sun.shadow.camera.top=40;sun.shadow.camera.bottom=-40;scene.add(sun);
+  const ft=texture('#64717d','rgba(225,235,242,.30)',32);ft.repeat.set(18,13);
+  const floor=new THREE.Mesh(new THREE.PlaneGeometry(96,70),mat(0x687581,.76,.04,{map:ft,bumpMap:ft,bumpScale:.018}));floor.rotation.x=-Math.PI/2;floor.receiveShadow=true;scene.add(floor);
+  const wall=mat(0x8492a5,.65,.12),trim=mat(0x26374b,.5,.3);
   [[0,-35,96,1],[0,35,96,1],[-48,0,1,70],[48,0,1,70]].forEach(w=>{box(w[0],2.25,w[1],w[2],4.5,w[3],wall);box(w[0],.18,w[1],w[2]+.1,.2,w[3]+.1,trim,false)});
   tower(-40,0,1);tower(40,0,2);
   for(const z of[-26,-13,13,26]){cover(-24,z,6,2.1,1.4);cover(24,-z,6,2.1,1.4)}
   for(const x of[-31,-15,15,31])barrier(x,x<0?5:-5,x%2?0:Math.PI/2);
   [[-31,-30],[-31,30],[-18,0],[-9,-20],[-8,21],[8,-21],[9,20],[18,0],[31,-30],[31,30]].forEach((p,i)=>crate(p[0],p[1],i%3===0?1.15:1));
   cover(0,0,8,4,1.15,0x713f12);cover(0,-16,3,8,1.3,0x334155);cover(0,16,3,8,1.3,0x334155);
-  for(const x of[-36,-12,12,36])for(const z of[-31,31]){box(x,4.3,z,5,.08,1.1,new THREE.MeshStandardMaterial({color:0xa5f3fc,emissive:0x38bdf8,emissiveIntensity:1.4}),false);const l=new THREE.PointLight(x<0?0x38bdf8:0xf59e0b,.8,18,2);l.position.set(x,3.8,z);scene.add(l)}
+  for(const x of[-36,-12,12,36])for(const z of[-31,31]){box(x,4.3,z,5,.08,1.1,new THREE.MeshStandardMaterial({color:0xe9fbff,emissive:0xbdeeff,emissiveIntensity:1.8}),false);const l=new THREE.PointLight(x<0?0xb9e8ff:0xffddb0,1.55,28,1.7);l.position.set(x,3.8,z);scene.add(l)}
   sign('DJB BASE',-40,-31,1.55);sign('MID CORE',0,-31,1.55);sign('AUTO BASE',40,31,1.55);
 };
 
@@ -117,7 +118,7 @@ move=function(dt){
 
 const legacyInit=init;
 function disposeScene(){if(!scene)return;scene.traverse(object=>{object.geometry?.dispose?.();const materials=Array.isArray(object.material)?object.material:[object.material];for(const material of materials)if(material){for(const value of Object.values(material))if(value?.isTexture)value.dispose();material.dispose?.()}})}
-init=function(){if(renderer)disposeScene();legacyInit();renderer.setPixelRatio(Math.min(devicePixelRatio,lowPower?1.2:1.75));renderer.shadowMap.enabled=!lowPower;renderer.domElement.setAttribute('aria-label','Mechanical War first-person combat view')};
+init=function(){if(renderer)disposeScene();legacyInit();renderer.setPixelRatio(Math.min(devicePixelRatio,lowPower?1.2:1.75));renderer.shadowMap.enabled=!lowPower;renderer.toneMappingExposure=1.62;renderer.domElement.setAttribute('aria-label','Mechanical War first-person combat view')};
 
 const legacyQuit=quit;
 quit=function(){mouse=false;reloadToken++;reloading=false;$('dead')?.classList.add('hide');$('loading')?.classList.add('hide');$('reloadState')?.classList.add('hide');legacyQuit()};
