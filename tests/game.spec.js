@@ -8,7 +8,25 @@ const peerMock = `
       setTimeout(() => this.handlers.open && this.handlers.open(this.id), 20);
     }
     on(name, cb) { this.handlers[name] = cb; }
-    connect() { return { open: true, on() {}, send() {}, close() {} }; }
+    connect() {
+      const handlers = {};
+      const connection = {
+        open: false,
+        on(name, cb) {
+          handlers[name] = cb;
+          if (name === 'open') setTimeout(() => { connection.open = true; cb(); }, 10);
+        },
+        send(message) {
+          if (message.type === 'join') setTimeout(() => handlers.data && handlers.data({
+            type: 'welcome',
+            players: [{ ...message.player, x: 42, y: 1.7, z: 8, hp: 200, gun: null, ammo: 0, res: 0 }],
+            guns: []
+          }), 10);
+        },
+        close() { connection.open = false; }
+      };
+      return connection;
+    }
     destroy() {}
   };
 `;
@@ -44,6 +62,20 @@ test('offers responsive touch controls and all distinct weapons', async ({ page 
   expect(new Set(Object.values(weapons).map(weapon => weapon.name)).size).toBe(8);
   await expect(page.locator('#mobileControls')).toHaveCount(1);
   await expect(page.locator('.mobile-action.fire')).toHaveText('FIRE');
+});
+
+test('joins an existing room through the client handshake', async ({ page }) => {
+  const errors = [];
+  page.on('pageerror', error => errors.push(error.message));
+  await page.goto('/');
+  await page.locator('#name').fill('Joiner');
+  await page.locator('#team2').click();
+  await page.locator('#join').click();
+
+  await expect(page.locator('#hud')).toBeVisible({ timeout: 10000 });
+  await expect(page.locator('#netRole')).toContainText('CLIENT');
+  await expect(page.locator('canvas')).toHaveCount(1);
+  expect(errors).toEqual([]);
 });
 
 test('enters a rendered office scene with the mocked host', async ({ page }) => {
