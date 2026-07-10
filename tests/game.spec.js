@@ -151,6 +151,71 @@ test('first-person weapon points forward toward the crosshair', async ({ page })
   expect(Math.abs(orientation.viewYaw)).toBeLessThan(0.25);
 });
 
+test('host pickup remains authoritative after another player joins', async ({ page }) => {
+  await page.goto('/');
+  await page.locator('#name').fill('Pickup Host');
+  await page.locator('#team1').click();
+  await page.locator('#enter').click();
+  await expect(page.locator('#loading')).toBeHidden({ timeout: 10000 });
+
+  const result = await page.evaluate(() => {
+    const sent = [];
+    const remoteId = 'remote-player';
+    players.set(remoteId, {
+      id: remoteId, name: 'Remote', team: 2, x: 42, y: 1.7, z: 8,
+      yaw: 1.57, pitch: 0, hp: 200, gun: null, ammo: 0, res: 0, last: Date.now()
+    });
+    conns.set(remoteId, { open: true, send: message => sent.push(structuredClone(message)), close() {} });
+    const gun = guns.find(item => !item.heldBy);
+    me.x = gun.x;
+    me.z = gun.z;
+    players.set(myId, pack());
+    pickup();
+    const gunSync = sent.find(message => message.type === 'guns');
+    return {
+      equipped: me.gun,
+      heldBy: gun.heldBy,
+      syncedHeldBy: gunSync?.guns.find(item => item.id === gun.id)?.heldBy,
+      remoteSawBulk: sent.some(message => message.type === 'bulk')
+    };
+  });
+
+  expect(result.equipped).toBeTruthy();
+  expect(result.heldBy).toBe(await page.evaluate(() => myId));
+  expect(result.syncedHeldBy).toBe(result.heldBy);
+  expect(result.remoteSawBulk).toBe(true);
+});
+
+test('host rejects remote pickup contention and impossible distance', async ({ page }) => {
+  await page.goto('/');
+  await page.locator('#name').fill('Validation Host');
+  await page.locator('#team1').click();
+  await page.locator('#enter').click();
+  await expect(page.locator('#loading')).toBeHidden({ timeout: 10000 });
+
+  const result = await page.evaluate(() => {
+    const gun = guns.find(item => !item.heldBy);
+    const remote = { id: 'remote', name: 'Remote', team: 2, x: 42, y: 1.7, z: 8, hp: 200, gun: null, ammo: 0, res: 0, last: Date.now() };
+    const replies = [];
+    const connection = { open: true, send: message => replies.push(structuredClone(message)) };
+    players.set(remote.id, remote);
+    hostPickup({ pid: remote.id, id: gun.id, x: gun.x, z: gun.z }, connection);
+    const distanceDenied = replies.at(-1)?.type === 'pickup_denied';
+    remote.x = gun.x;
+    remote.z = gun.z;
+    replies.length = 0;
+    hostPickup({ pid: remote.id, id: gun.id, x: gun.x, z: gun.z }, connection);
+    const picked = gun.heldBy === remote.id;
+    const contender = { id: 'contender', name: 'Contender', team: 2, x: gun.x, y: 1.7, z: gun.z, hp: 200, gun: null, ammo: 0, res: 0, last: Date.now() };
+    players.set(contender.id, contender);
+    replies.length = 0;
+    hostPickup({ pid: contender.id, id: gun.id, x: gun.x, z: gun.z }, connection);
+    return { distanceDenied, picked, contentionDenied: replies.at(-1)?.type === 'pickup_denied', owner: gun.heldBy };
+  });
+
+  expect(result).toEqual({ distanceDenied: true, picked: true, contentionDenied: true, owner: 'remote' });
+});
+
 test('respawns in the same room after elimination', async ({ page }) => {
   const errors = [];
   page.on('pageerror', error => errors.push(error.message));

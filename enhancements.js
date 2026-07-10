@@ -79,6 +79,18 @@ const legacyDrawHand=drawHand;
 drawHand=function(force=false){if(!hand)return;if(!force&&handRef===hand&&handWeapon===me.gun)return;handRef=hand;handWeapon=me.gun;legacyDrawHand()};
 drawGuns=function(){if(!scene)return;const ids=new Set(guns.map(g=>g.id));for(const[id,m]of gunMeshes)if(!ids.has(id)){scene.remove(m);gunMeshes.delete(id)}for(const g of guns){let m=gunMeshes.get(g.id);if(!m){m=gunMesh(g.type);scene.add(m);gunMeshes.set(g.id,m)}m.visible=!g.heldBy;m.position.set(g.x,g.y,g.z);m.rotation.y=(performance.now()*.00055+(Number(g.id.slice(1))||0))%(Math.PI*2)}drawHand()};
 
+let pendingPickup=null;
+function rejectPickup(connection,reason){if(connection?.open)connection.send({type:'pickup_denied',reason,guns});else feed(reason)}
+pickup=function(){const gun=nearest();if(!gun){feed('No gun close enough.');return}if(pendingPickup)return;const request={type:'pickup',pid:myId,id:gun.id,x:me.x,z:me.z};if(isHost)hostPickup(request);else{pendingPickup=gun.id;send(request);setTimeout(()=>{if(pendingPickup===gun.id){pendingPickup=null;feed('Pickup timed out. Try again.')}},1200)}};
+hostPickup=function(request,connection){
+  const player=players.get(request.pid),gun=guns.find(item=>item.id===request.id);if(!player||!gun)return rejectPickup(connection,'Weapon is unavailable.');
+  if(gun.heldBy)return rejectPickup(connection,'Another player already took that weapon.');
+  if(player.gun)return rejectPickup(connection,'Drop your current weapon first.');
+  const x=Number(request.x),z=Number(request.z);if(!Number.isFinite(x)||!Number.isFinite(z)||Math.hypot(x-player.x,z-player.z)>6||Math.hypot(x-gun.x,z-gun.z)>5.1)return rejectPickup(connection,'Move closer to pick up that weapon.');
+  player.x=x;player.z=z;player.gun=gun.type;player.ammo=GUN[gun.type].mag;player.res=GUN[gun.type].res;gun.heldBy=request.pid;
+  if(request.pid===myId)takeGun(gun.id,gun.type,true);if(connection?.open)connection.send({type:'pickup_ok',gunId:gun.id,gunType:gun.type});broadcast();feed((player.name||'Player')+' picked '+GUN[gun.type].n);
+};
+
 function tone(freq,duration=.05,volume=.035,type='square'){try{audioContext??=new(window.AudioContext||window.webkitAudioContext)();const o=audioContext.createOscillator(),gain=audioContext.createGain();o.type=type;o.frequency.setValueAtTime(freq,audioContext.currentTime);o.frequency.exponentialRampToValueAtTime(Math.max(40,freq*.55),audioContext.currentTime+duration);gain.gain.setValueAtTime(volume,audioContext.currentTime);gain.gain.exponentialRampToValueAtTime(.0001,audioContext.currentTime+duration);o.connect(gain).connect(audioContext.destination);o.start();o.stop(audioContext.currentTime+duration)}catch(e){}}
 function gunSound(type){const f={pistol:190,smg:150,shotgun:95,rifle:135,ak47:115,m4:145,rpg:62,knife:420}[type]||150;tone(f,type==='rpg'?.22:type==='shotgun'?.12:.055,type==='rpg'?.1:.045,type==='knife'?'sine':'sawtooth')}
 function muzzleFlash(type){if(!hand)return;const flash=new THREE.Mesh(new THREE.SphereGeometry(type==='rpg'?.14:.075,7,5),new THREE.MeshBasicMaterial({color:type==='rpg'?0xff6b18:0xffe066}));flash.position.set(.02,.02,-1.25);hand.add(flash);setTimeout(()=>hand?.remove(flash),45)}
@@ -129,7 +141,7 @@ renderList=function(){if(renderScheduled)return;renderScheduled=true;requestAnim
 // The legacy bulk merge used `incomingGun || currentGun`, so an authoritative null
 // could never clear a dropped weapon. Apply nullable inventory fields explicitly.
 const legacyHandle=handle;
-handle=function(message){const inventory=(message?.type==='bulk'||message?.type==='welcome')?message.players?.find(player=>player.id===myId):null;legacyHandle(message);if(inventory){me.gun=inventory.gun??null;me.ammo=Number.isFinite(inventory.ammo)?inventory.ammo:0;me.res=Number.isFinite(inventory.res)?inventory.res:0;ui()}};
+handle=function(message){const inventory=(message?.type==='bulk'||message?.type==='welcome')?message.players?.find(player=>player.id===myId):null;legacyHandle(message);if(message?.type==='pickup_ok')pendingPickup=null;if(message?.type==='pickup_denied'){pendingPickup=null;if(message.guns){guns=message.guns.map(gun=>({...gun}));drawGuns()}feed(message.reason||'Weapon pickup denied.')}if(inventory){me.gun=inventory.gun??null;me.ammo=Number.isFinite(inventory.ammo)?inventory.ammo:0;me.res=Number.isFinite(inventory.res)?inventory.res:0;ui()}};
 
 const recentShots=new Map();
 function validHit(m,shooter){const weapon=GUN[m.weapon],target=players.get(m.target),shot=recentShots.get(shooter.id);if(!weapon||!target||target.team===shooter.team||target.hp<=0||shooter.gun!==m.weapon||!shot||performance.now()-shot.time>350)return false;const max=weapon.d*(weapon.pel||1)*1.5;return Number.isFinite(m.dmg)&&m.dmg>0&&m.dmg<=max&&Math.hypot(target.x-shooter.x,target.z-shooter.z)<=weapon.range+(weapon.blast||0)+2}
