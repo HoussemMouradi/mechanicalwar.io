@@ -2,6 +2,8 @@
 const SHOT = {
   glock: { freq: 1400, q: 0.8, len: 0.16, gain: 0.55, thump: 140 },
   mp5: { freq: 900, q: 0.6, len: 0.1, gain: 0.3, thump: 110 },
+  ump45: { freq: 710, q: 0.65, len: 0.16, gain: 0.48, thump: 88 },
+  scar: { freq: 1250, q: 0.65, len: 0.23, gain: 0.72, thump: 94 },
   nova: { freq: 600, q: 0.5, len: 0.42, gain: 0.95, thump: 70 },
   ak47: { freq: 800, q: 0.7, len: 0.24, gain: 0.8, thump: 85 },
   m4a4: { freq: 1100, q: 0.7, len: 0.2, gain: 0.65, thump: 100 },
@@ -106,6 +108,8 @@ export class Audio {
     this.tone({ freq: s.thump, len: s.len * 0.8, gain: s.gain * 0.9, dest, to: 0.4 });
     if (type === 'awp' || type === 'nova') this.burst({ freq: 300, q: 0.3, len: s.len * 1.5, gain: s.gain * 0.35, type: 'lowpass', dest, delay: 0.05 });
     if (type === 'mp5') this.burst({ freq: 3000, q: 1, len: 0.04, gain: 0.08, type: 'highpass', dest });
+    if (type === 'ump45') this.burst({ freq: 1850, q: 2.5, len: 0.045, gain: 0.1, dest, delay: 0.055 });
+    if (type === 'scar') this.burst({ freq: 2100, q: 0.5, len: 0.12, gain: 0.12, type: 'highpass', dest, delay: 0.035 });
   }
 
   knife(pos) {
@@ -128,9 +132,10 @@ export class Audio {
   reload(type) {
     if (!this.ensure()) return;
     const d = this.master;
-    this.burst({ freq: 2200, q: 4, len: 0.05, gain: 0.35, dest: d, delay: 0.1 });
-    this.burst({ freq: 1600, q: 4, len: 0.06, gain: 0.4, dest: d, delay: type === 'awp' ? 1.2 : 0.8 });
-    this.burst({ freq: 2800, q: 5, len: 0.05, gain: 0.45, dest: d, delay: type === 'awp' ? 2.4 : 1.4 });
+    const polymerMag = type === 'ump45' || type === 'scar';
+    this.burst({ freq: polymerMag ? 1400 : 2200, q: 4, len: 0.05, gain: 0.35, dest: d, delay: 0.1 });
+    this.burst({ freq: polymerMag ? 1100 : 1600, q: 4, len: 0.06, gain: 0.4, dest: d, delay: type === 'awp' ? 1.2 : 0.8 });
+    this.burst({ freq: type === 'ump45' ? 2300 : 2800, q: 5, len: 0.05, gain: 0.45, dest: d, delay: type === 'awp' ? 2.4 : 1.4 });
   }
 
   step(pos, surface = 'carpet') {

@@ -4,6 +4,7 @@ export const isTouchDevice = () => matchMedia('(pointer: coarse)').matches || (n
 const BUTTONS = [
   ['fire', 'FIRE'], ['jump', 'JUMP'], ['crouch', 'DUCK'], ['reload', 'R'],
   ['use', 'USE'], ['swap', 'SWAP'], ['scope', 'SCOPE'], ['pause', 'II'],
+  ['heal', 'HEAL'], ['boost', 'BOOST'], ['frag', 'FRAG'], ['smoke', 'SMOKE'],
 ];
 
 export class TouchControls {
@@ -13,7 +14,7 @@ export class TouchControls {
     const root = document.createElement('div');
     root.id = 'touch';
     root.innerHTML = `<div class="t-stick-zone"><div class="t-stick"><i></i></div></div><div class="t-look"></div>`
-      + BUTTONS.map(([id, label]) => `<button class="t-btn t-${id}" data-act="${id}">${label}</button>`).join('');
+      + BUTTONS.map(([id, label]) => `<button class="t-btn t-${id}" data-act="${id}">${label}${['heal', 'boost', 'frag', 'smoke'].includes(id) ? '<small>0</small>' : ''}</button>`).join('');
     document.body.appendChild(root);
     this.root = root;
     this.bindStick(root.querySelector('.t-stick-zone'), root.querySelector('.t-stick'));
@@ -70,6 +71,7 @@ export class TouchControls {
     const g = this.game, act = btn.dataset.act;
     const down = e => {
       e.preventDefault();
+      btn.setPointerCapture(e.pointerId);
       btn.classList.add('on');
       g.touchAction(act, true);
     };

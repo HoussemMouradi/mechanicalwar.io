@@ -3,10 +3,11 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "test": "node tests/syntax-check.js && playwright test"
+    "test": "node tests/syntax-check.js && playwright test",
+    "start": "node scripts/serve.cjs"
   },
   "devDependencies": {
     "@playwright/test": "^1.61.1",
-    "http-server": "^14.1.1"
+    "three": "0.160.0"
   }
 }

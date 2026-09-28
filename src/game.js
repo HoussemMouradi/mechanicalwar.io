@@ -18,6 +18,8 @@ import { Net } from './net.js';
 import { Host } from './host.js';
 import { setAnisotropy } from './textures.js';
 import { TouchControls, isTouchDevice } from './touch.js';
+import { SUPPLIES } from './survival.js';
+import { buildSupply, disposeSupply, SmokeEffects } from './supplies.js';
 
 const RADIUS = 0.3, STAND_H = 1.8, CROUCH_H = 1.25, EYE_STAND = 1.64, EYE_CROUCH = 1.12;
 const GRAVITY = 20, JUMP_V = 6.6, STEP = 0.36, RUN_SPEED = 6.0;
@@ -47,12 +49,14 @@ export class Game {
     this.me = {
       id: 'p_' + Math.random().toString(36).slice(2, 10), name: profile.name, team: profile.team, char: profile.char,
       pos: v3(), vel: v3(), yaw: 0, pitch: 0, onGround: true, crouch: 0, crouching: false,
-      hp: MAX_HP, alive: true, kills: 0, deaths: 0, diedAt: 0, killer: null,
+      hp: MAX_HP, armor: null, helmet: null, boost: 0, bag: { bandage: 0, firstaid: 0, energy: 0, frag: 0, smoke: 0 }, using: null, alive: true, kills: 0, deaths: 0, diedAt: 0, killer: null,
       inv: this.freshInventory(), slot: 'secondary', prevSlot: 'melee', prop: null,
     };
     this.remotes = new Map();
     this.guns = new Map();
     this.props = new Map();
+    this.supplies = new Map();
+    this.grenades = new Map();
     this.rockets = [];
     this.score = { 1: 0, 2: 0 };
     this.keys = new Set();
@@ -82,6 +86,7 @@ export class Game {
     this.world = buildWorld(this.scene, this.quality);
     this.hud = new Hud(this.world);
     this.fx = new Effects(this.scene);
+    this.smokeEffects = new SmokeEffects(this.scene);
     audio.setVolume(this.settings.volume);
     this.bindInput();
     this.buildViewmodel();
@@ -140,7 +145,7 @@ export class Game {
       vp.clear = false;
       vp.clearDepth = true;
       this.composer.addPass(vp);
-      this.composer.addPass(new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.32, 0.5, 0.92));
+      this.composer.addPass(new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.15, 0.5, 0.92));
       this.composer.addPass(new OutputPass());
     } else {
       this.renderer.autoClear = false;
@@ -212,6 +217,7 @@ export class Game {
     this.guns.clear();
     for (const p of this.props.values()) this.scene.remove(p.mesh);
     this.props.clear();
+    this.clearSupplies();
     if (this.me.inv.primary) this.me.inv.primary.gunId = null;
     if (this.me.prop) { this.me.prop = null; if (this.me.slot === 'prop') this.equip('secondary', true); }
   }
@@ -254,6 +260,10 @@ export class Game {
           case 'KeyE': this.interact(); break;
           case 'KeyG': this.dropCurrent(); break;
           case 'KeyV': this.request({ type: 'emote' }); break;
+          case 'KeyH': this.useSupply(); break;
+          case 'KeyB': this.useSupply('energy'); break;
+          case 'KeyF': this.throwGrenade('frag'); break;
+          case 'KeyX': this.throwGrenade('smoke'); break;
           case 'Space': e.preventDefault(); break;
         }
       },
@@ -330,6 +340,10 @@ export class Game {
     else if (act === 'use') this.interact();
     else if (act === 'swap') this.cycleWeapon(1);
     else if (act === 'scope') this.toggleScope();
+    else if (act === 'heal') this.useSupply();
+    else if (act === 'boost') this.useSupply('energy');
+    else if (act === 'frag') this.throwGrenade('frag');
+    else if (act === 'smoke') this.throwGrenade('smoke');
     else if (act === 'pause') this.setPaused(true);
   }
 
@@ -423,7 +437,7 @@ export class Game {
 
   startReload() {
     const it = this.curItem(), w = it && WEAPONS[it.type];
-    if (!w || w.melee || this.wep.reloadT > 0 || it.ammo >= w.mag || it.res <= 0 || !this.me.alive) return;
+    if (this.me.using || !w || w.melee || this.wep.reloadT > 0 || it.ammo >= w.mag || it.res <= 0 || !this.me.alive) return;
     this.unscope();
     this.wep.reloadT = this.wep.reloadDur = w.reload;
     audio.reload(it.type);
@@ -438,7 +452,7 @@ export class Game {
   }
 
   toggleScope() {
-    if (this.curType() !== 'awp' || this.wep.reloadT > 0 || this.wep.drawT > 0) return;
+    if (this.me.using || this.curType() !== 'awp' || this.wep.reloadT > 0 || this.wep.drawT > 0) return;
     this.wep.scoped = !this.wep.scoped;
     this.camera.fov = this.wep.scoped ? 22 : this.settings.fov;
     this.camera.updateProjectionMatrix();
@@ -478,11 +492,13 @@ export class Game {
       if (dist > INTERACT_RANGE + 0.6) return;
       const dot = d.normalize().dot(fwd);
       if (dot < 0.9) return;
+      if (this.castWorld(eye, d, dist).dist < dist - 0.15) return;
       const score = dot * 4 - dist;
       if (score > bestScore) { bestScore = score; best = { kind, o }; }
     };
     for (const g of this.guns.values()) if (!g.heldBy) consider('gun', g, g.y);
     for (const p of this.props.values()) if (p.state === 'rest') consider('prop', p, p.y);
+    for (const s of this.supplies.values()) consider('supply', s, s.y + 0.15);
     return best;
   }
 
@@ -493,7 +509,41 @@ export class Game {
     if (t.kind === 'gun') {
       const cur = this.me.inv.primary;
       this.request({ type: 'pickup', id: t.o.id, ammo: cur?.ammo || 0, res: cur?.res || 0 });
-    } else if (!this.me.prop) this.request({ type: 'grab', id: t.o.id });
+    } else if (t.kind === 'supply') {
+      const def = SUPPLIES[t.o.kind], current = this.me[def.category];
+      if (current && (current.tier > def.tier || (current.tier === def.tier && current.hp >= def.durability))) {
+        this.hud.toast('Your equipped protection is already as good or better.'); return;
+      }
+      if (def.cap && this.me.bag[t.o.kind] >= def.cap) { this.hud.toast(`${def.name}: carrying capacity reached.`); return; }
+      this.request({ type: 'supplyPickup', id: t.o.id });
+    }
+    else if (!this.me.prop) this.request({ type: 'grab', id: t.o.id });
+  }
+
+  useSupply(item = null) {
+    const m = this.me;
+    if (!m.alive || !this.ready || this.paused) return;
+    if (m.using) { this.request({ type: 'cancelUse' }); return; }
+    if (!item) item = m.bag.firstaid ? 'firstaid' : 'bandage';
+    if (!m.bag[item]) { this.hud.toast(item === 'energy' ? 'Find an energy drink to build boost.' : 'Find a first aid kit or bandages to heal.'); return; }
+    if (item !== 'energy' && m.hp >= 75) { this.hud.toast('Medical supplies heal to 75 HP. Boost restores the rest.'); return; }
+    if (item === 'energy' && m.boost >= 100) { this.hud.toast('Boost is already full.'); return; }
+    this.wep.reloadT = 0;
+    this.mouse.left = false;
+    this.unscope();
+    this.request({ type: 'useSupply', item });
+  }
+
+  throwGrenade(kind) {
+    const m = this.me;
+    if (!m.alive || !this.ready || this.paused || !['frag', 'smoke'].includes(kind)) return;
+    if (m.prop) { this.hud.toast('Drop the held prop before throwing a grenade.'); return; }
+    if (!m.bag[kind]) { this.hud.toast(`No ${kind === 'frag' ? 'frag' : 'smoke'} grenades. Pick one up with E.`); return; }
+    this.unscope();
+    this.wep.reloadT = 0;
+    this.wep.drawT = 0.45;
+    this.kick.rx = 0.3;
+    this.request({ type: 'throwGrenade', kind, dir: this.forward().toArray() });
   }
 
   throwProp(charge, gentle = false) {
@@ -560,6 +610,7 @@ export class Game {
   fire() {
     const m = this.me, type = this.curType(), w = WEAPONS[type], it = this.curItem();
     if (!w) return;
+    if (m.using) this.request({ type: 'cancelUse' });
     if (w.melee) return this.slash(w);
     if (it.ammo <= 0) {
       this.wep.fired = true;
@@ -709,7 +760,7 @@ export class Game {
     this.scene.add(rig.root);
     const r = {
       id: info.id, name: info.name, team: info.team, char: info.char, kills: info.kills || 0, deaths: info.deaths || 0,
-      alive: info.alive !== false, hp: info.hp ?? MAX_HP, rig,
+      alive: info.alive !== false, hp: info.hp ?? MAX_HP, armor: info.armor || null, helmet: info.helmet || null, boost: info.boost || 0, rig,
       tx: info.x || 0, ty: info.y || 0, tz: info.z || 0, rx: info.x || 0, ry: info.y || 0, rz: info.z || 0,
       yaw: info.yaw || 0, ryaw: info.yaw || 0, pitch: 0, crouch: false, onGround: true, w: 'glock', mv: 0,
       lastFired: 0, stepT: 0, propId: null, vapeT: now() + Math.random() * 5000,
@@ -749,6 +800,92 @@ export class Game {
       g.mesh.visible = !heldBy;
     }
     for (const [id, g] of this.guns) if (!seen.has(id)) { this.scene.remove(g.mesh); this.guns.delete(id); }
+  }
+
+  applyVitals(state) {
+    if (!state) return;
+    const m = this.me, previousBag = m.bag, oldArmor = m.armor?.hp || 0, oldHelmet = m.helmet?.hp || 0;
+    if (Number.isFinite(state.hp)) m.hp = state.hp;
+    m.armor = state.armor || null;
+    m.helmet = state.helmet || null;
+    m.boost = state.boost || 0;
+    m.bag = { bandage: 0, firstaid: 0, energy: 0, frag: 0, smoke: 0, ...state.bag };
+    m.using = state.using ? { ...state.using } : null;
+    this.vitalsAt = now();
+    if (this.ready && (Object.keys(m.bag).some(k => m.bag[k] > (previousBag?.[k] || 0)) || (m.armor?.hp || 0) > oldArmor || (m.helmet?.hp || 0) > oldHelmet)) audio.ui();
+    this.hud.setHp(m.hp);
+    this.hud.setVitals(m);
+  }
+
+  syncSupplies(list = []) {
+    const seen = new Set();
+    for (const s of list) {
+      if (!SUPPLIES[s.kind] || !Array.isArray(s.p)) continue;
+      seen.add(s.id);
+      let local = this.supplies.get(s.id);
+      if (local && local.kind !== s.kind) { disposeSupply(local.mesh); this.supplies.delete(s.id); local = null; }
+      if (!local) {
+        const mesh = buildSupply(s.kind);
+        mesh.rotation.y = Math.sin(String(s.id).length * 2.7) * Math.PI;
+        this.scene.add(mesh);
+        local = { id: s.id, kind: s.kind, mesh };
+        this.supplies.set(s.id, local);
+      }
+      [local.x, local.y, local.z] = s.p;
+      local.mesh.position.set(local.x, Math.max(0.008, local.y - 0.16), local.z);
+    }
+    for (const [id, s] of this.supplies) if (!seen.has(id)) { disposeSupply(s.mesh); this.supplies.delete(id); }
+  }
+
+  syncGrenades(list = []) {
+    const seen = new Set();
+    for (const s of list) {
+      if (!['frag', 'smoke'].includes(s.kind) || !Array.isArray(s.p)) continue;
+      seen.add(s.id);
+      if (s.smoking) {
+        const old = this.grenades.get(s.id);
+        if (old) { disposeSupply(old.mesh); this.grenades.delete(s.id); }
+        this.smokeEffects.add(s.id, s.p, s.radius, s.remaining);
+        continue;
+      }
+      let local = this.grenades.get(s.id);
+      if (!local) {
+        const mesh = buildSupply(s.kind, { marker: false });
+        mesh.position.set(...s.p); this.scene.add(mesh);
+        local = { id: s.id, kind: s.kind, mesh, target: new THREE.Vector3(...s.p) };
+        this.grenades.set(s.id, local);
+      }
+      local.target.set(...s.p); local.v = s.v || [0, 0, 0]; local.remaining = s.remaining;
+    }
+    for (const [id, s] of this.grenades) if (!seen.has(id)) { disposeSupply(s.mesh); this.grenades.delete(id); }
+    for (const id of this.smokeEffects.clouds.keys()) if (!seen.has(id)) this.smokeEffects.remove(id);
+  }
+
+  updateSupplies(dt, t) {
+    for (const s of this.supplies.values()) {
+      const ring = s.mesh.userData.ring;
+      if (ring) ring.material.opacity = 0.26 + Math.sin(t * 0.002 + s.x) * 0.12;
+    }
+    for (const g of this.grenades.values()) {
+      g.mesh.position.lerp(g.target, Math.min(1, dt * 24));
+      if (Math.hypot(...g.v) > 0.5) { g.mesh.rotation.x += dt * 5; g.mesh.rotation.z += dt * 2.2; }
+    }
+    const opacity = this.smokeEffects.update(dt, this.camera);
+    this.hud.smoke(opacity);
+    for (const r of this.remotes.values()) {
+      const hidden = this.smokeEffects.obscures(this.camera.position, new THREE.Vector3(r.rx, r.ry + 1, r.rz));
+      r.smokeHidden = hidden;
+      if (hidden) r.rig.root.visible = false;
+    }
+  }
+
+  clearSupplies() {
+    for (const s of this.supplies.values()) disposeSupply(s.mesh);
+    this.supplies.clear();
+    for (const g of this.grenades.values()) disposeSupply(g.mesh);
+    this.grenades.clear();
+    this.smokeEffects?.clear();
+    this.hud?.smoke(0);
   }
 
   syncProps(list) {
@@ -796,6 +933,9 @@ export class Game {
         m.vel.set(0, 0, 0);
         m.yaw = y.yaw; m.pitch = 0;
         if (!m.alive || !this.ready) this.resetLife();
+        this.syncSupplies(msg.supplies || []);
+        this.syncGrenades(msg.grenades || []);
+        this.applyVitals(msg.vitals);
         this.ready = true;
         this.onStatus(null);
         this.updateHudWeapon();
@@ -821,6 +961,11 @@ export class Game {
         break;
       }
       case 'snap':
+        for (const state of msg.v || []) {
+          if (state.id === m.id) this.applyVitals(state);
+          else { const r = this.remotes.get(state.id); if (r) Object.assign(r, { armor: state.armor, helmet: state.helmet, boost: state.boost }); }
+        }
+        if (msg.grenades) this.syncGrenades(msg.grenades);
         for (const [id, x, y, z, yaw, pitch, flags, w, mv, hp] of msg.s) {
           if (id === m.id) continue;
           const r = this.remotes.get(id);
@@ -893,10 +1038,28 @@ export class Game {
         if (msg.id === m.id) this.respawnLocal(msg);
         else {
           const r = this.remotes.get(msg.id);
-          if (r) Object.assign(r, { alive: true, hp: MAX_HP, tx: msg.x, ty: msg.y, tz: msg.z, rx: msg.x, ry: msg.y, rz: msg.z, yaw: msg.yaw, ryaw: msg.yaw });
+          if (r) Object.assign(r, { alive: true, hp: MAX_HP, armor: msg.vitals?.armor || null, helmet: msg.vitals?.helmet || null, boost: msg.vitals?.boost || 0, tx: msg.x, ty: msg.y, tz: msg.z, rx: msg.x, ry: msg.y, rz: msg.z, yaw: msg.yaw, ryaw: msg.yaw });
         }
         break;
       }
+      case 'supplies': this.syncSupplies(msg.list); break;
+      case 'vitals':
+        if (msg.to === m.id) this.applyVitals(msg.state);
+        else { const r = this.remotes.get(msg.to); if (r && msg.state) Object.assign(r, { hp: msg.state.hp, armor: msg.state.armor, helmet: msg.state.helmet, boost: msg.state.boost }); }
+        break;
+      case 'grenades': this.syncGrenades(msg.list); break;
+      case 'detonate': {
+        const g = this.grenades.get(msg.id);
+        if (g) { disposeSupply(g.mesh); this.grenades.delete(msg.id); }
+        const pos = new THREE.Vector3(...msg.p);
+        if (msg.kind === 'smoke') this.smokeEffects.add(msg.id, msg.p, msg.radius, msg.duration);
+        else {
+          this.fx.explosion(pos); audio.explosion(pos);
+          this.shake = Math.max(this.shake, Math.max(0, 0.07 - pos.distanceTo(this.camera.position) * 0.004));
+        }
+        break;
+      }
+      case 'supplyMessage': if (!msg.to || msg.to === m.id) this.hud.toast(msg.text); break;
       case 'guns': this.syncGuns(msg.list); break;
       case 'gunGrant': {
         if (msg.to !== m.id) break;
@@ -970,6 +1133,8 @@ export class Game {
           m.prop = null;
           if (msg.guns) this.syncGuns(msg.guns);
           if (msg.props) this.syncProps(msg.props);
+          this.syncSupplies(msg.supplies || []);
+          this.syncGrenades(msg.grenades || []);
           this.hud.banner('<b>NEW MATCH</b><small>Back to work.</small>', 2500);
         }
         break;
@@ -989,6 +1154,10 @@ export class Game {
   resetLife() {
     const m = this.me;
     m.hp = MAX_HP; m.alive = true; m.killer = null;
+    m.armor = m.helmet = m.using = null; m.boost = 0;
+    m.bag = { bandage: 0, firstaid: 0, energy: 0, frag: 0, smoke: 0 };
+    this.hud.setVitals(m);
+    this.hud.useProgress(null);
     m.inv = this.freshInventory();
     m.prop = null;
     m.slot = 'none';
@@ -1000,6 +1169,7 @@ export class Game {
   die(killer, weapon, head) {
     const m = this.me;
     m.alive = false; m.hp = 0; m.diedAt = now();
+    m.using = null; this.hud.useProgress(null);
     m.inv.primary = null; m.prop = null;
     this.unscope();
     this.wep.reloadT = 0;
@@ -1023,6 +1193,7 @@ export class Game {
     m.crouching = false; m.crouch = 0;
     this.recoil.x = this.recoil.y = 0;
     this.resetLife();
+    this.applyVitals(s.vitals);
   }
 
   /* ================= simulation ================= */
@@ -1152,6 +1323,10 @@ export class Game {
     this.recoil.x -= this.recoil.x * rec;
     this.recoil.y -= this.recoil.y * rec;
     if (!m.alive || this.paused || !this.ready) return;
+    if (m.using) {
+      if (this.mouse.left) { this.request({ type: 'cancelUse' }); m.using = null; }
+      else return;
+    }
 
     if (m.slot === 'prop') {
       if (this.mouse.left && m.prop) {
@@ -1270,9 +1445,10 @@ export class Game {
     let reloadTilt = 0, p = 0;
     if (wp.reloadT > 0) { p = 1 - wp.reloadT / wp.reloadDur; reloadTilt = Math.sin(Math.min(1, p * 1.15) * Math.PI); }
     const charge = m.slot === 'prop' ? wp.charge : 0;
+    const useLower = m.using ? 0.22 : 0;
     vm.position.set(
       base.x + this.sway.x + Math.sin(this.bobT) * 0.012 * bobAmt,
-      base.y + this.sway.y - Math.abs(Math.cos(this.bobT)) * 0.012 * bobAmt - draw * 0.25 - reloadTilt * 0.04 - m.crouch * 0.01 + charge * 0.05,
+      base.y + this.sway.y - Math.abs(Math.cos(this.bobT)) * 0.012 * bobAmt - draw * 0.25 - reloadTilt * 0.04 - m.crouch * 0.01 + charge * 0.05 - useLower,
       base.z + this.kick.z + charge * 0.18,
     );
     let rx = this.kick.rx - draw * 0.9 + reloadTilt * 0.35 - charge * 0.3, ry = this.sway.x * 2, rz = reloadTilt * 0.55;
@@ -1311,14 +1487,17 @@ export class Game {
     this.hud.radar(m, this.remotes, t);
     this.hud.labels(this.camera, m, this.remotes, t);
     this.hud.scoreboard(!!this.showBoard, m, this.remotes, this.score);
+    const remaining = m.using ? Math.max(0, m.using.remaining - (t - (this.vitalsAt || t)) / 1000) : 0;
+    this.hud.useProgress(m.alive && m.using ? { ...m.using, remaining } : null);
 
     let prompt = '';
     if (m.alive && this.ready) {
       if (m.slot === 'prop' && m.prop) prompt = `<kbd>LMB</kbd> hold to wind up, release to throw the ${PROPS[m.prop.type].name.toLowerCase()} &nbsp; <kbd>G</kbd> drop`;
       else {
         const target = this.interactTarget();
-        if (target?.kind === 'gun') prompt = `<kbd>E</kbd> pick up <b>${WEAPONS[target.o.type].name}</b>`;
-        else if (target?.kind === 'prop') prompt = m.prop ? 'Hands full' : `<kbd>E</kbd> grab <b>${PROPS[target.o.type].name}</b> to throw it`;
+        if (target?.kind === 'gun') prompt = `<kbd>${this.touch ? 'USE' : 'E'}</kbd> pick up <b>${WEAPONS[target.o.type].name}</b>`;
+        else if (target?.kind === 'supply') prompt = `<kbd>${this.touch ? 'USE' : 'E'}</kbd> pick up <b>${SUPPLIES[target.o.kind].label}</b>`;
+        else if (target?.kind === 'prop') prompt = m.prop ? 'Hands full' : `<kbd>${this.touch ? 'USE' : 'E'}</kbd> grab <b>${PROPS[target.o.type].name}</b> to throw it`;
       }
     }
     this.hud.prompt(prompt);
@@ -1327,7 +1506,7 @@ export class Game {
       const o = this.camera.position, d = this.forward();
       const wall = this.castWorld(o, d, 60);
       const hit = this.castPlayers(o, d, wall.dist);
-      this.hud.enemyName(hit ? hit.p.name : '');
+      this.hud.enemyName(hit && !hit.p.smokeHidden ? hit.p.name : '');
     } else this.hud.enemyName('');
 
     if (!m.alive) {
@@ -1349,6 +1528,7 @@ export class Game {
     this.updateProps(dt);
     this.updateRockets(dt);
     this.updateCamera(dt);
+    this.updateSupplies(dt, t);
     this.updateViewmodel(dt);
     this.fx.update(dt);
     for (const g of this.guns.values()) if (g.mesh.visible) g.ring.material.opacity = 0.2 + Math.sin(t * 0.004) * 0.12;
@@ -1373,6 +1553,7 @@ export class Game {
     this.worker?.terminate();
     clearInterval(this.tickTimer);
     this.touch?.dispose();
+    this.clearSupplies();
     document.exitPointerLock?.();
   }
 }

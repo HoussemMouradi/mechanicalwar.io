@@ -16,6 +16,51 @@ export function boxGeo(w, h, d, meters = 0) {
   return g;
 }
 
+// A small planar chamfer catches light on furniture edges without subdivision
+// surfaces or a modelling asset. Dimensions remain identical to the collision box.
+export function beveledBoxGeo(w, h, d, bevel = 0.01, meters = 0) {
+  const half = [w / 2, h / 2, d / 2];
+  const r = Math.min(bevel, ...half.map(v => v * 0.45));
+  if (r <= 0) return boxGeo(w, h, d, meters);
+  const inset = half.map(v => v - r), positions = [], normals = [], uvs = [], indices = [];
+  const add = (points, normal) => {
+    const n = new THREE.Vector3(...normal).normalize();
+    const ab = new THREE.Vector3().subVectors(new THREE.Vector3(...points[1]), new THREE.Vector3(...points[0]));
+    const ac = new THREE.Vector3().subVectors(new THREE.Vector3(...points[2]), new THREE.Vector3(...points[0]));
+    if (ab.cross(ac).dot(n) < 0) points.reverse();
+    const offset = positions.length / 3;
+    const major = normal.map(Math.abs).indexOf(Math.max(...normal.map(Math.abs)));
+    const axes = [0, 1, 2].filter(a => a !== major);
+    for (const p of points) {
+      positions.push(...p); normals.push(n.x, n.y, n.z);
+      uvs.push((p[axes[0]] + half[axes[0]]) / (meters || half[axes[0]] * 2), (p[axes[1]] + half[axes[1]]) / (meters || half[axes[1]] * 2));
+    }
+    for (let i = 1; i < points.length - 1; i++) indices.push(offset, offset + i, offset + i + 1);
+  };
+  for (let axis = 0; axis < 3; axis++) for (const sign of [-1, 1]) {
+    const other = [0, 1, 2].filter(a => a !== axis), n = [0, 0, 0]; n[axis] = sign;
+    add([[-1, -1], [1, -1], [1, 1], [-1, 1]].map(([a, b]) => {
+      const p = [0, 0, 0]; p[axis] = sign * half[axis]; p[other[0]] = a * inset[other[0]]; p[other[1]] = b * inset[other[1]]; return p;
+    }), n);
+  }
+  for (let a = 0; a < 3; a++) for (let b = a + 1; b < 3; b++) for (const sa of [-1, 1]) for (const sb of [-1, 1]) {
+    const c = 3 - a - b, n = [0, 0, 0]; n[a] = sa; n[b] = sb;
+    add([[false, -1], [true, -1], [true, 1], [false, 1]].map(([edge, sc]) => {
+      const p = [0, 0, 0]; p[a] = sa * (edge ? inset[a] : half[a]); p[b] = sb * (edge ? half[b] : inset[b]); p[c] = sc * inset[c]; return p;
+    }), n);
+  }
+  for (const sx of [-1, 1]) for (const sy of [-1, 1]) for (const sz of [-1, 1]) {
+    const signs = [sx, sy, sz];
+    add([0, 1, 2].map(axis => signs.map((s, a) => s * (a === axis ? half[a] : inset[a]))), signs);
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  g.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
+  g.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+  g.setIndex(indices);
+  return g;
+}
+
 export function planeGeo(w, h, meters = 0) {
   const g = new THREE.PlaneGeometry(w, h);
   if (meters) {

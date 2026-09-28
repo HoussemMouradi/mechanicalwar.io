@@ -29,20 +29,47 @@ A Counter-Strike-style multiplayer office shooter that runs directly in the brow
 | Ctrl / C | Crouch; crouch mid-jump to tuck your legs and land on desks |
 | Space | Jump |
 | Mouse | Aim / fire, right-click scopes the AWP |
-| E | Pick up a weapon or grab an office prop |
+| E | Pick up weapons, armor, helmets or supplies; grab an office prop |
+| H / B | Use first aid (or bandage) / energy drink; press again to cancel |
+| F / X | Throw a frag / smoke grenade |
 | LMB with a prop | Hold to charge, release to throw it at someone |
 | R / G / V | Reload / drop / emote |
 | 1-4, wheel | Primary, pistol, knife, held prop |
 | Tab | Scoreboard |
 | Esc | Pause and settings |
 
-Touch devices get a floating move stick, drag-to-look and FIRE / JUMP / DUCK / R / USE / SWAP / SCOPE buttons.
+Touch devices get a floating move stick, drag-to-look and FIRE / JUMP / DUCK / R / USE / SWAP / SCOPE buttons, plus HEAL / BOOST / FRAG / SMOKE with inventory counts.
 
 ### Weapons and props
 
-Knife (backstabs kill), Glock-18, MP5, Nova, AK-47, M4A4, AWP and RPG-7, each with its own damage, head multiplier, spray recoil, spread, reload, move speed and procedural sound. Floor weapons are spread through the office (AWP in the CEO office, M4 in the server room, RPG at reception...).
+Knife (backstabs kill), Glock-18, MP5, UMP-45, Nova, AK-47, M4A4, SCAR-L, AWP and RPG-7, each with its own damage, head multiplier, spray recoil, spread, reload, move speed and procedural sound. Floor weapons are spread through the office (AWP in the CEO office, M4 in the server room, RPG at reception...).
 
 Keyboards, mugs, staplers, phones, laptops, monitors, extinguishers, plants, bins, office chairs and printers can all be picked up and thrown; heavier items slow you down and hurt more.
+
+## Tactical survival update
+
+![Office update with SCAR-L, armor and supplies](docs/tactical-office.png)
+
+Development preview in offline practice mode, with scavenged equipment.
+
+The office keeps its AUTO vs DJB team-deathmatch format. Both spawn areas have basic supplies; better combat vests sit in the contested office. Look at a floor item and press **E**. Items restock after 30–55 seconds, depending on type. Everyone respawns with 100 HP, a pistol and a knife; armor and supplies must be scavenged again.
+
+| Item | Effect |
+| --- | --- |
+| Patrol vest | Absorbs 30% of body damage; 100 durability |
+| Combat vest | Absorbs 40% of body damage; 150 durability |
+| Ballistic helmet | Absorbs 50% of head damage; 80 durability |
+| Bandages | Pack of 3; each heals 20 HP after a 3-second use, up to 75 HP |
+| First aid kit | 5-second use restores health to 75 HP |
+| Energy drink | 3-second use adds 40 boost; boost drains by 1 per second and gradually heals up to 100 HP |
+| Frag grenade | 3-second fuse, bouncing trajectory, 7 m blast radius; walls block damage, teammates are immune, self-damage is reduced |
+| Smoke grenade | 2-second fuse, 4.5 m cloud radius lasting 16 seconds; conceals player models and labels, bullets still pass through |
+
+Armor loses durability by the damage it absorbs; knives bypass armor. First aid and bandages cannot heal above 75 HP. Boost heals 1 HP per second, rising to 1.5 HP per second above 60 boost. Carry limits: 8 bandages, 3 first-aid kits, 4 energy drinks, 3 frags and 3 smoke grenades. Moving more than 0.6 m from the use position, taking damage, firing or throwing cancels medical/boost use without consuming the item. **H** prefers first aid when available. **G** remains weapon/prop drop.
+
+Graphics use original procedural assets: worn carpet and wall surfaces, separate height/roughness maps, beveled desk tops, window blinds, recessed fluorescent fixtures, office service details, baked contact shadows, softer bloom and more detailed weapon models. Low quality retains the material/detail improvements; higher presets add dynamic shadows and postprocessing. This is a browser-friendly step toward a grounded Source-era office aesthetic.
+
+The new gameplay protocol uses the v5 room so old clients cannot accidentally join an incompatible match. Host migration starts a fresh survival state; armor, consumables, boost and active grenades do not transfer to the newly elected host.
 
 ## Architecture
 
@@ -57,6 +84,7 @@ No build step: plain ES modules, three.js 0.160 via an import map and PeerJS 1.5
 - `src/world.js` builds the office map (desks, colliders you can stand on, lighting, radar data). It uses `src/textures.js` for procedural canvas textures and materials, and `src/geometry.js` for static batching helpers.
 - `src/weapons.js`, `src/characters.js` and `src/props.js` build the weapon models and first-person arms, the character rigs (IK arms) and the throwable props with their physics.
 - `src/fx.js` and `src/audio.js` provide the effects and procedural WebAudio sound.
+- `src/survival.js` defines supply balance, spawn locations, grenade physics and cover intersection. `src/supplies.js` builds loot models and bounded tactical smoke.
 - `src/hud.js` draws the CS-style HUD: radar, kill feed, scoreboard and damage indicators.
 - `src/config.js` holds teams, characters, weapons, props, quality presets and saved settings.
 
@@ -65,17 +93,18 @@ If the host leaves, the remaining players reconnect and one of them takes over a
 ## Local development
 
 ```bash
-npm install
+npm ci
 npx playwright install chromium
 npm test
+npm start
 ```
 
-`npm test` runs a module syntax check, then Playwright tests against a mocked PeerJS broker. The tests cover the menu, the RH denial, entering the office, landing on a desk, throwing a prop, and two tabs joining the same room and shooting each other.
+`npm test` runs module syntax checks, host-authority tests and Playwright gameplay tests against a mocked PeerJS broker. Coverage includes existing movement/props/multiplayer, armor, healing/boost, grenade physics and cover, smoke lifetime, new weapons, and late joins. Browser tests use a pinned local copy of Three.js, so CDN outages do not affect the results. Production still uses the static import map.
 
 To play locally, double-click `play-local.cmd` (Windows), or run the command below. Opening `index.html` directly from disk does not work: browsers block ES modules on `file://` pages.
 
 ```bash
-npx http-server . -p 4173 -c-1
+npm start
 ```
 
 Then open `http://127.0.0.1:4173` (open two tabs to play against yourself).

@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { materials } from './textures.js';
-import { StaticBatch, boxGeo, planeGeo, trs } from './geometry.js';
+import { StaticBatch, boxGeo, beveledBoxGeo, planeGeo, trs } from './geometry.js';
 import { buildPropMesh } from './props.js';
 import { PROPS } from './config.js';
 
@@ -22,15 +22,21 @@ export function buildWorld(scene, quality) {
   scene.add(root);
 
   const frost = new THREE.MeshStandardMaterial({ color: 0xf1f5f9, roughness: 0.6, transparent: true, opacity: 0.55, depthWrite: false });
-  const carpetBlue = M.carpet.clone(); carpetBlue.color = new THREE.Color(0x9fb8e8); carpetBlue.userData.meters = 2;
-  const carpetWarm = M.carpet.clone(); carpetWarm.color = new THREE.Color(0xd8c4b0); carpetWarm.userData.meters = 2;
-  const stone = new THREE.MeshStandardMaterial({ color: 0xe8e6e1, roughness: 0.25 });
-  const tv = new THREE.MeshStandardMaterial({ map: M.screens[2].map, emissiveMap: M.screens[2].map, emissive: 0xffffff, emissiveIntensity: 1.2, roughness: 0.2 });
+  const carpetBlue = M.carpet.clone(); carpetBlue.color = new THREE.Color(0xa8b6b7); carpetBlue.userData.meters = 2;
+  const carpetWarm = M.carpet.clone(); carpetWarm.color = new THREE.Color(0xc6bc9f); carpetWarm.userData.meters = 2;
+  const stone = new THREE.MeshStandardMaterial({ color: 0xbab9ae, roughness: 0.31, bumpMap: M.concrete.bumpMap, bumpScale: 0.004 });
+  const tv = new THREE.MeshStandardMaterial({ map: M.screens[2].map, emissiveMap: M.screens[2].map, emissive: 0xffffff, emissiveIntensity: 0.7, roughness: 0.2 });
   const vend = new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: 0x9fd7ff, emissiveIntensity: 0.9, roughness: 0.3 });
   const rubber = new THREE.MeshStandardMaterial({ color: 0x151515, roughness: 0.9 });
   const carPaint = new THREE.MeshPhysicalMaterial({ color: 0xd9480f, roughness: 0.3, metalness: 0.6, clearcoat: 1, clearcoatRoughness: 0.1 });
   const cardboard = new THREE.MeshStandardMaterial({ color: 0xb08850, roughness: 0.95 });
   const bookMats = [0x7f1d1d, 0x1e3a8a, 0x14532d, 0x78350f, 0x334155, 0xa16207].map(c => new THREE.MeshStandardMaterial({ color: c, roughness: 0.8 }));
+
+  // Baked contact occlusion remains visible with dynamic shadows disabled. It is
+  // static, batched and confined to the floor, so low/mobile adds no light passes.
+  function groundShadow(x, z, w, d, ry = 0) {
+    batch.add(planeGeo(w + 0.55, d + 0.55), M.contactShadow, trs(x, 0.012, z, -Math.PI / 2, 0, -ry), { cast: false, receive: false });
+  }
 
   function collider(x, y, z, hx, hy, hz, opts = {}) {
     colliders.push({ x, y, z, hx, hy, hz, ...opts });
@@ -39,8 +45,11 @@ export function buildWorld(scene, quality) {
 
   // Box with bottom at y0; textures tile in world space.
   function solid(x, y0, z, w, h, d, mat, opts = {}) {
-    batch.add(boxGeo(w, h, d, mat.userData.meters || 0), mat, trs(x, y0 + h / 2, z, 0, opts.ry || 0, 0), { cast: opts.cast !== false });
+    const finishEdge = h <= 0.15 && h >= 0.025 && w > 1 && d > 0.4 && [M.wood, M.darkWood, stone].includes(mat);
+    const geo = finishEdge ? beveledBoxGeo(w, h, d, Math.min(0.012, h * 0.25), mat.userData.meters || 0) : boxGeo(w, h, d, mat.userData.meters || 0);
+    batch.add(geo, mat, trs(x, y0 + h / 2, z, 0, opts.ry || 0, 0), { cast: opts.cast !== false });
     if (opts.collide !== false) collider(x, y0 + h / 2, z, w / 2, h / 2, d / 2, opts);
+    if (y0 === 0 && h > 0.3 && Math.max(w, d) < 13) groundShadow(x, z, w, d, opts.ry || 0);
   }
 
   function deco(geo, mat, matrix, cast = true) { batch.add(geo, mat, matrix, { cast }); }
@@ -55,6 +64,8 @@ export function buildWorld(scene, quality) {
 
   function prop(type, x, surfaceY, z, ry = 0, variant = 0) {
     propSpots.push({ type, x, y: surfaceY + PROPS[type].half[1], z, ry, variant });
+    // Movable props deliberately do not get baked silhouettes: their live
+    // shadow must follow them when a player picks them up or throws them.
   }
 
   function gun(type, x, surfaceY, z) { gunSpots.push({ type, x, y: surfaceY + 0.06, z }); }
@@ -87,6 +98,10 @@ export function buildWorld(scene, quality) {
       } else {
         solid(px, 0, pz, w, WALL_H, d, mat);
         solid(px, 0, pz, axis === 'x' ? len : t + 0.03, 0.1, axis === 'x' ? t + 0.03 : len, M.baseboard, { collide: false, cast: false });
+        // A recessed ceiling perimeter and floor/wall contact strip gives long
+        // corridors depth even on the low preset without changing collision.
+        solid(px, WALL_H - 0.09, pz, axis === 'x' ? len : t + 0.10, 0.07, axis === 'x' ? t + 0.10 : len, M.greyPlastic, { collide: false, cast: false });
+        if (len >= 13) groundShadow(px, pz, axis === 'x' ? len : 0.22, axis === 'x' ? 0.22 : len);
       }
     }
   }
@@ -102,7 +117,9 @@ export function buildWorld(scene, quality) {
       }
       solid(px, 0, pz, W(len), 0.1, D(len), M.frame, { collide: false });
       solid(px, WALL_H - 0.12, pz, W(len), 0.12, D(len), M.frame, { collide: false });
-      batch.add(boxGeo(W(len) - (axis === 'x' ? 0 : 0.06), WALL_H - 0.22, D(len) - (axis === 'x' ? 0.06 : 0)), M.glass, trs(px, WALL_H / 2 - 0.01, pz), { cast: false, receive: false });
+      // A single transparent surface avoids stacking the front/back faces of a
+      // thin box, which previously made meeting-room glass look nearly opaque.
+      batch.add(planeGeo(len, WALL_H - 0.22), M.glass, trs(px, WALL_H / 2 - 0.01, pz, 0, axis === 'x' ? 0 : Math.PI / 2), { cast: false, receive: false });
       batch.add(boxGeo(axis === 'x' ? len : 0.085, 0.3, axis === 'x' ? 0.085 : len), frost, trs(px, 1.25, pz), { cast: false, receive: false });
       const n = Math.max(1, Math.round(len / 1.6));
       for (let i = 0; i <= n; i++) {
@@ -119,8 +136,19 @@ export function buildWorld(scene, quality) {
     solid(mid, 0, z, len, 0.95, 0.3, M.drywall, { collide: false });
     solid(mid, 2.75, z, len, WALL_H - 2.75, 0.3, M.drywall, { collide: false });
     solid(mid, 0.93, z + inward * 0.2, len, 0.05, 0.22, stone, { radar: false });
-    batch.add(boxGeo(len, 1.8, 0.02), M.glass, trs(mid, 1.85, z), { cast: false, receive: false });
+    batch.add(planeGeo(len, 1.8), M.glass, trs(mid, 1.85, z), { cast: false, receive: false });
     for (let x = from; x <= to + 0.01; x += 2.5) solid(x, 0.95, z, 0.09, 1.8, 0.16, M.frame, { collide: false });
+    solid(mid, 1.78, z, len, 0.055, 0.11, M.frame, { collide: false });
+    solid(mid, 2.71, z + inward * 0.14, len, 0.08, 0.12, M.greyPlastic, { collide: false });
+    for (let x = from + 1.25; x < to; x += 2.5) {
+      // Partially raised venetian blinds add real silhouette detail against daylight.
+      for (let n = 0; n < 4; n++) {
+        deco(boxGeo(2.38, 0.022, 0.10), M.greyPlastic, trs(x, 2.61 - n * 0.08, z + inward * 0.13, inward * 0.2), false);
+      }
+      if (inward < 0 && x > -26 && x < 26) {
+        batch.add(planeGeo(2.32, 3.6), M.windowLight, trs(x - 0.7, 0.008, z - 2.6, -Math.PI / 2, 0, -0.2), { cast: false, receive: false });
+      }
+    }
     solid(mid, 0, z + inward * 0.16, len, 0.1, 0.03, M.baseboard, { collide: false, cast: false });
     collider(mid, WALL_H / 2, z, len / 2, WALL_H / 2, 0.15);
   }
@@ -156,6 +184,21 @@ export function buildWorld(scene, quality) {
   deco(new THREE.PlaneGeometry(6, 2.25), M.logoDjb, trs(39.83, 2.1, 0, 0, -Math.PI / 2), false);
   deco(new THREE.PlaneGeometry(6, 1.5), M.logoAuto, trs(-28.12, 2.75, 9, 0, -Math.PI / 2), false);
   deco(new THREE.PlaneGeometry(3.6, 1.35), M.logoDjb, trs(28.12, 2.75, -9, 0, Math.PI / 2), false);
+
+  // Legible room signage and door thresholds help players identify routes.
+  function roomSign(key, x, y, z, ry = 0) {
+    deco(boxGeo(1.65, 0.44, 0.025), M.frame, trs(x, y, z, 0, ry), false);
+    const outward = new THREE.Vector3(0, 0, 0.016).applyAxisAngle(new THREE.Vector3(0, 1, 0), ry);
+    deco(planeGeo(1.58, 0.395), M.roomSigns[key], trs(x + outward.x, y, z + outward.z, 0, ry), false);
+  }
+  roomSign('garage', -27.87, 2.72, -4.2, Math.PI / 2);
+  roomSign('lounge', 27.87, 2.72, 4.2, -Math.PI / 2);
+  roomSign('conference', -15, 2.72, -14.92);
+  roomSign('office', 15, 2.72, -14.92);
+  roomSign('kitchen', -15, 2.72, 14.88, Math.PI);
+  roomSign('server', 15, 2.72, 14.88, Math.PI);
+  roomSign('reception', 0, 1.45, -26.02);
+  roomSign('print', 0, 2.72, 27.82, Math.PI);
 
   /* ---------- north rooms ---------- */
   wall('z', -24, -28, -15, [[-24, -21]]);
@@ -309,6 +352,7 @@ export function buildWorld(scene, quality) {
   let podIndex = 0;
   function deskPod(cx, cz) {
     const TOP = 0.75;
+    groundShadow(cx, cz, 3.15, 1.72);
     for (const row of [-1, 1]) {
       const rz = cz + row * 0.43;
       solid(cx, TOP - 0.04, rz, 3.2, 0.04, 0.8, M.wood, { radar: false });
@@ -328,17 +372,22 @@ export function buildWorld(scene, quality) {
         deco(boxGeo(0.005, 0.3, 0.01), M.blueTrim, trs(dx + 0.45, 0.3, cz + row * 0.5 + row * 0.226), false);
         const chair = buildPropMesh('chair', podIndex);
         stamp(chair, dx, PROPS.chair.half[1], cz + row * 1.3, row < 0 ? 0 : Math.PI);
+        groundShadow(dx, cz + row * 1.3, 0.45, 0.45);
         colliders.push({ x: dx, y: 0.25, z: cz + row * 1.3, hx: 0.27, hy: 0.25, hz: 0.27 });
       }
     }
     solid(cx, 0, cz, 3.3, 1.3, 0.06, M.fabric);
     solid(cx, 1.3, cz, 3.34, 0.03, 0.08, M.frame, { collide: false });
+    // Cable tray and modest under-desk bracing give the desks construction detail.
+    solid(cx, 0.47, cz, 3.06, 0.075, 0.19, M.darkMetal, { collide: false });
     radar.push({ x: cx, z: cz, hx: 1.6, hz: 0.83, tall: false });
   }
   for (const x of [-18.5, -6, 6, 18.5]) for (const z of [-8, 8]) deskPod(x, z);
 
   for (const [x, z] of [[-12, 0], [12, 0], [-24, -8], [24, 8]]) {
     solid(x, 0, z, 0.8, WALL_H, 0.8, M.concrete);
+    solid(x, 0, z, 0.85, 0.13, 0.85, M.baseboard, { collide: false });
+    solid(x, WALL_H - 0.12, z, 0.92, 0.1, 0.92, M.greyPlastic, { collide: false });
     prop('plant', x + 0.75, 0, z + 0.75, 0, Math.abs(x | 0));
   }
   prop('extinguisher', -12.5, 0, -0.55);
@@ -358,6 +407,10 @@ export function buildWorld(scene, quality) {
   gun('ak47', 26, 0, -8);
   gun('mp5', -12, 0, -3);
   gun('mp5', 12, 0, 3);
+  gun('ump45', -19, 0, 3.5);
+  gun('ump45', 19, 0, -3.5);
+  gun('scar', -2.5, 0, 18);
+  gun('scar', 2.5, 0, -18);
   prop('bin', -9.5, 0, -12, 0);
   prop('bin', 9.5, 0, 12, 0);
   deco(new THREE.PlaneGeometry(1.1, 1.55), M.posters[1], trs(-23.88, 1.7, -8, 0, Math.PI / 2), false);
@@ -382,6 +435,7 @@ export function buildWorld(scene, quality) {
       }
     }
     stamp(g, cx, 0, cz);
+    groundShadow(cx, cz, 1.75, 4.1);
     colliders.push({ x: cx, y: 0.47, z: cz, hx: 0.93, hy: 0.47, hz: 2.15 });
     colliders.push({ x: cx, y: 1.22, z: cz - 0.2, hx: 0.8, hy: 0.28, hz: 1.05 });
     radar.push({ x: cx, z: cz, hx: 0.93, hz: 2.15, tall: false });
@@ -390,6 +444,7 @@ export function buildWorld(scene, quality) {
   function tires(x, z, n) {
     for (let i = 0; i < n; i++) deco(new THREE.TorusGeometry(0.3, 0.13, 10, 20), rubber, trs(x, 0.13 + i * 0.26, z, Math.PI / 2));
     collider(x, n * 0.13, z, 0.43, n * 0.13, 0.43);
+    groundShadow(x, z, 0.7, 0.7);
   }
   tires(-38.8, -26.8, 4); tires(-37.9, -26.8, 3); tires(-38.8, 26.8, 5); tires(-31, -9, 3);
   solid(-39.4, 0, -12, 0.8, 1.05, 1.6, M.red);
@@ -448,12 +503,41 @@ export function buildWorld(scene, quality) {
   const xs = [-36, -31, -26, -20, -15, -10, -3, 3, 10, 15, 20, 26, 31, 36];
   const zs = [-25, -20, -10, -4, 4, 10, 20, 25];
   for (const x of xs) for (const z of zs) {
-    deco(boxGeo(1.2, 0.04, 0.6), M.lightPanel, trs(x, WALL_H - 0.02, z), false);
-    deco(boxGeo(1.28, 0.03, 0.68), M.frame, trs(x, WALL_H - 0.012, z), false);
+    deco(boxGeo(1.3, 0.075, 0.68), M.frame, trs(x, WALL_H - 0.045, z), false);
+    deco(boxGeo(1.23, 0.025, 0.61), M.whitePlastic, trs(x, WALL_H - 0.088, z), false);
+    deco(boxGeo(1.12, 0.015, 0.50), M.lightPanel, trs(x, WALL_H - 0.109, z), false);
+    if (quality.shadows) for (let rib = -0.4; rib <= 0.4; rib += 0.2) {
+      deco(boxGeo(0.014, 0.022, 0.51), M.greyPlastic, trs(x + rib, WALL_H - 0.124, z), false);
+    }
+  }
+  for (const x of [-33, -18, 0, 18, 33]) for (const z of [-16, 0, 16]) {
+    deco(boxGeo(0.7, 0.045, 0.7), M.greyPlastic, trs(x, WALL_H - 0.03, z), false);
+    deco(planeGeo(0.64, 0.64), M.vent, trs(x, WALL_H - 0.055, z, Math.PI / 2), false);
+  }
+
+  // Power outlets, conduits and AC return grilles provide familiar human-scale
+  // reference along the office walls. They never obstruct the navigation mesh.
+  for (const x of [-23.87, -6.13, 6.13, 23.87]) for (const z of [-25.5, 25.5]) {
+    const sign = x < 0 ? 1 : -1;
+    deco(boxGeo(0.028, 0.12, 0.21), M.whitePlastic, trs(x, 0.34, z), false);
+    for (const dz of [-0.052, 0.052]) {
+      deco(boxGeo(0.032, 0.012, 0.006), M.darkMetal, trs(x + sign * 0.007, 0.34, z + dz - 0.015), false);
+      deco(boxGeo(0.032, 0.012, 0.006), M.darkMetal, trs(x + sign * 0.007, 0.34, z + dz + 0.015), false);
+    }
+  }
+  for (const x of [-39.81, 39.81]) for (const z of [-18, 18]) {
+    const ry = x < 0 ? Math.PI / 2 : -Math.PI / 2;
+    deco(planeGeo(1.1, 0.65), M.vent, trs(x, 2.58, z, 0, ry), false);
+    deco(boxGeo(0.04, 1.25, 0.04), M.greyPlastic, trs(x, 1.67, z + 0.62), false);
+    deco(boxGeo(0.055, 0.17, 0.11), M.red, trs(x, 1.03, z + 0.62), false);
   }
 
   const meshes = batch.build(root);
   for (const m of meshes) {
+    if (m.material === M.contactShadow || m.material === M.windowLight) {
+      m.renderOrder = 1;
+      continue;
+    }
     if (m.material === M.ceiling || m.material === M.lightPanel) continue;
     m.layers.enable(2);
   }
@@ -473,9 +557,9 @@ export const SPAWNS = {
 
 function addLights(scene, quality) {
   const lights = [];
-  scene.add(new THREE.HemisphereLight(0xdfe9f5, 0x4a4238, 0.9));
+  scene.add(new THREE.HemisphereLight(0xc9dce8, 0x514b3e, 0.78));
 
-  const sun = new THREE.DirectionalLight(0xffe3b8, quality.shadows ? 4.2 : 1.2);
+  const sun = new THREE.DirectionalLight(0xffe5bd, quality.shadows ? 3.4 : 0.85);
   sun.position.set(28, 26, 60);
   sun.target.position.set(0, 0, 0);
   scene.add(sun, sun.target);
@@ -489,7 +573,7 @@ function addLights(scene, quality) {
 
   // Soft overhead key light: the ceiling is excluded from its shadow pass (layer 2 only),
   // so furniture gets grounded contact shadows as if lit by the ceiling panels.
-  const overhead = new THREE.DirectionalLight(0xfff4e6, 1.9);
+  const overhead = new THREE.DirectionalLight(0xf3eddc, quality.shadows ? 1.65 : 1.95);
   overhead.position.set(6, 40, 9);
   overhead.target.position.set(0, 0, 0);
   scene.add(overhead, overhead.target);
@@ -499,13 +583,13 @@ function addLights(scene, quality) {
     Object.assign(overhead.shadow.camera, { left: -42, right: 42, top: 30, bottom: -30, near: 30, far: 50 });
     overhead.shadow.camera.layers.set(2);
     overhead.shadow.bias = -0.0005;
-    overhead.shadow.normalBias = 0.04;
-    overhead.shadow.radius = 4;
+    overhead.shadow.normalBias = 0.022;
+    overhead.shadow.radius = 2.5;
   }
 
   const spots = [
-    [0, 0, 0xfff1dc, 14], [-18.5, -8, 0xfff1dc, 12], [18.5, 8, 0xfff1dc, 12], [-18.5, 8, 0xfff1dc, 12], [18.5, -8, 0xfff1dc, 12],
-    [-34, 0, 0xffc890, 9], [34, 0, 0xb4d2ff, 9], [15, 21.5, 0x60a5fa, 14], [-15, -21.5, 0xfff1dc, 12], [15, -21.5, 0xffe0b0, 12],
+    [0, 0, 0xffeed2, 14], [-18.5, -8, 0xfff1dc, 12], [18.5, 8, 0xe3edee, 12], [-18.5, 8, 0xfff1dc, 12], [18.5, -8, 0xe3edee, 12],
+    [-34, 0, 0xffd7a1, 9], [34, 0, 0xc5e0ed, 9], [15, 21.5, 0xa6cdda, 14], [-15, -21.5, 0xfff1dc, 12], [15, -21.5, 0xffe0b0, 12],
     [-15, 21.5, 0xfff1dc, 12], [0, -21, 0xfff1dc, 10], [-6, -8, 0xfff1dc, 10], [6, 8, 0xfff1dc, 10], [0, 22, 0xfff1dc, 10], [-34, 20, 0xffb070, 10],
   ];
   for (const [x, z, color, power] of spots.slice(0, quality.lights)) {
