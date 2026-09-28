@@ -88,6 +88,10 @@
       <span><kbd>LMB</kbd> fire / throw</span>
       <span><kbd>RMB</kbd> AWP scope</span>
       <span><kbd>R</kbd> reload</span>
+      <span><kbd>H</kbd> heal / cancel</span>
+      <span><kbd>B</kbd> energy boost</span>
+      <span><kbd>F</kbd> frag grenade</span>
+      <span><kbd>X</kbd> smoke grenade</span>
       <span><kbd>G</kbd> drop</span>
       <span><kbd>1</kbd>-<kbd>4</kbd> weapons</span>
       <span><kbd>V</kbd> emote</span>
@@ -111,7 +115,8 @@
   <div id="pause" class="overlay hide">
     <div class="modal">
       <h2>PAUSED</h2>
-      <p class="muted">Click resume to jump back in.</p>
+      <p class="muted">Loot armor and supplies from the floor with E. Stay still while healing; energy boost regenerates health up to 100.</p>
+      <div class="pause-controls"><span><kbd>H</kbd> Heal / cancel</span><span><kbd>B</kbd> Energy</span><span><kbd>F</kbd> Frag</span><span><kbd>X</kbd> Smoke</span></div>
       <div class="modal-actions">
         <button id="resume" class="btn primary">Resume</button>
         <button id="pauseSettings" class="btn">Settings</button>
@@ -156,6 +161,7 @@
   </div>
 
   <div id="hud" class="hide">
+    <div id="smokeVeil" aria-hidden="true"></div>
     <canvas id="radar" width="200" height="200"></canvas>
     <div id="netBadge"></div>
     <div id="scoreTop">
@@ -172,6 +178,19 @@
     <div id="prompt"></div>
     <div id="charge"><i></i></div>
     <div id="selfBubble"></div>
+    <div id="useProgress" role="status"><div><span id="useLabel"></span><b id="useTimer"></b></div><div class="use-track"><i id="useBar"></i></div><small>Stay still · fire, move, or press H / B to cancel</small></div>
+    <div id="equipment">
+      <div id="armorStat" class="gear-stat"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 2h3v4h4V2h3l4 6-2 3v11H5V11L3 8z"/></svg><span>VEST <small id="armorState">NONE</small></span><b id="armorVal">—</b><div class="gear-track"><i id="armorBar"></i></div></div>
+      <div id="helmetStat" class="gear-stat"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 14v-3a9 9 0 0 1 18 0v3h-5v5h-4v-5zM2 15h9v3H2z"/></svg><span>HELMET <small id="helmetState">NONE</small></span><b id="helmetVal">—</b><div class="gear-track"><i id="helmetBar"></i></div></div>
+      <div id="boostStat" class="gear-stat"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M13 1 3 14h7l-1 9 12-14h-8z"/></svg><span>BOOST <small>REGEN</small></span><b id="boostVal">0</b><div class="gear-track boost-track"><i id="boostBar"></i></div></div>
+    </div>
+    <div id="supplyBelt" aria-label="Supplies inventory">
+      <div class="supply-slot empty" title="First aid: 5 seconds, restores to 75 HP"><kbd>H</kbd><span>FIRST AID</span><b id="firstaidCount">0</b></div>
+      <div class="supply-slot empty" title="Bandages: 3 seconds, +20 HP up to 75"><kbd>H</kbd><span>BANDAGE</span><b id="bandageCount">0</b></div>
+      <div class="supply-slot empty" title="Energy: 3 seconds, +40 boost"><kbd>B</kbd><span>ENERGY</span><b id="energyCount">0</b></div>
+      <div class="supply-slot empty" title="Frag grenade: 3 second fuse"><kbd>F</kbd><span>FRAG</span><b id="fragCount">0</b></div>
+      <div class="supply-slot empty" title="Smoke grenade: 16 seconds of cover"><kbd>X</kbd><span>SMOKE</span><b id="smokeCount">0</b></div>
+    </div>
     <div id="hpBox">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 2h6v7h7v6h-7v7H9v-7H2V9h7z"/></svg>
       <b id="hpVal">100</b>

@@ -2,7 +2,13 @@ import * as THREE from 'three';
 
 const cache = new Map();
 let anisotropy = 8;
-export const setAnisotropy = v => { anisotropy = v; };
+export const setAnisotropy = v => {
+  anisotropy = v;
+  // Materials are cached across matches; a quality change also updates existing maps.
+  for (const texture of cache.values()) {
+    if (texture.anisotropy !== v) { texture.anisotropy = v; texture.needsUpdate = true; }
+  }
+};
 
 function rand(seed) {
   let s = seed >>> 0 || 1;
@@ -56,9 +62,9 @@ function blotches(ctx, w, h, count, color, maxR, seed) {
 export const TEX = {
   carpet: () => cached('carpet', () => {
     const [c, x] = makeCanvas(512, 512);
-    x.fillStyle = '#4a5260'; x.fillRect(0, 0, 512, 512);
+    x.fillStyle = '#666762'; x.fillRect(0, 0, 512, 512);
     for (let i = 0; i < 4; i++) for (let j = 0; j < 4; j++) {
-      x.fillStyle = (i + j) % 2 ? '#4d5564' : '#464e5b';
+      x.fillStyle = (i + j) % 2 ? '#686a66' : '#62645f';
       x.fillRect(i * 128, j * 128, 128, 128);
       x.strokeStyle = 'rgba(0,0,0,.22)'; x.lineWidth = 1.5;
       for (let k = 0; k < 128; k += 5) {
@@ -68,9 +74,9 @@ export const TEX = {
         x.stroke();
       }
     }
-    noise(x, 512, 512, 46, 7);
+    noise(x, 512, 512, 31, 7);
     blotches(x, 512, 512, 18, 'rgba(20,20,30,.10)', 60, 3);
-    x.strokeStyle = 'rgba(0,0,0,.35)'; x.lineWidth = 2;
+    x.strokeStyle = 'rgba(0,0,0,.19)'; x.lineWidth = 1;
     for (let p = 0; p <= 512; p += 128) { x.beginPath(); x.moveTo(p, 0); x.lineTo(p, 512); x.stroke(); x.beginPath(); x.moveTo(0, p); x.lineTo(512, p); x.stroke(); }
     const t = toTexture(c); t.userData.meters = 2; return t;
   }),
@@ -87,9 +93,15 @@ export const TEX = {
 
   drywall: () => cached('drywall', () => {
     const [c, x] = makeCanvas(512, 512);
-    x.fillStyle = '#d9d4ca'; x.fillRect(0, 0, 512, 512);
-    blotches(x, 512, 512, 30, 'rgba(160,150,135,.035)', 90, 5);
-    noise(x, 512, 512, 7, 9);
+    x.fillStyle = '#cbc8bb'; x.fillRect(0, 0, 512, 512);
+    blotches(x, 512, 512, 45, 'rgba(110,100,80,.055)', 90, 5);
+    noise(x, 512, 512, 11, 9);
+    const r = rand(10);
+    x.strokeStyle = 'rgba(80,75,63,.07)'; x.lineWidth = 0.8;
+    for (let i = 0; i < 70; i++) {
+      const px = r() * 512, py = r() * 512;
+      x.beginPath(); x.moveTo(px, py); x.lineTo(px + r() * 12, py + r() * 2); x.stroke();
+    }
     const t = toTexture(c); t.userData.meters = 2.5; return t;
   }),
 
@@ -163,6 +175,68 @@ export const TEX = {
     for (let i = 0; i < 400; i++) { x.fillStyle = `rgba(255,255,255,${r() * 0.06})`; x.fillRect(0, r() * 256, 256, 1); }
     noise(x, 256, 256, 18, 62);
     const t = toTexture(c); t.userData.meters = 1; return t;
+  }),
+
+  // Small, reusable surface details keep the office self-contained and inexpensive.
+  lightLens: () => cached('lightLens', () => {
+    const [c, x] = makeCanvas(256, 128);
+    x.fillStyle = '#d8dbcb'; x.fillRect(0, 0, 256, 128);
+    for (let y = 0; y < 128; y += 8) for (let px = 0; px < 256; px += 8) {
+      x.fillStyle = '#fbf8df'; x.fillRect(px + 1, y + 1, 5, 5);
+      x.fillStyle = '#bfc4b7'; x.fillRect(px + 6, y, 1, 8);
+    }
+    return toTexture(c, { repeat: false });
+  }),
+
+  vent: () => cached('vent', () => {
+    const [c, x] = makeCanvas(256, 256);
+    x.fillStyle = '#a7aba5'; x.fillRect(0, 0, 256, 256);
+    for (let n = 0; n < 5; n++) {
+      const p = 18 + n * 18;
+      x.strokeStyle = '#555d59'; x.lineWidth = 6; x.strokeRect(p, p, 256 - p * 2, 256 - p * 2);
+      x.strokeStyle = '#dadbd1'; x.lineWidth = 3; x.strokeRect(p + 4, p + 4, 248 - p * 2, 248 - p * 2);
+    }
+    noise(x, 256, 256, 8, 92);
+    return toTexture(c, { repeat: false });
+  }),
+
+  sign: (label, number) => cached('sign:' + label, () => {
+    const [c, x] = makeCanvas(512, 128);
+    x.fillStyle = '#253339'; x.fillRect(0, 0, 512, 128);
+    x.fillStyle = '#bdaf85'; x.fillRect(0, 0, 9, 128);
+    x.fillStyle = '#9aa69e'; x.font = '16px Arial'; x.fillText('MECHANICAL WORKS  /  LEVEL 04', 28, 28);
+    x.fillStyle = '#eeeee2'; x.font = 'bold 34px Arial'; x.fillText(label, 27, 77);
+    x.fillStyle = '#bdaf85'; x.font = '18px Arial'; x.fillText(number, 29, 106);
+    return toTexture(c, { repeat: false });
+  }),
+
+  contactShadow: () => cached('contactShadow', () => {
+    const [c, x] = makeCanvas(128, 128);
+    const img = x.createImageData(128, 128);
+    for (let py = 0; py < 128; py++) for (let px = 0; px < 128; px++) {
+      const edge = Math.max(Math.abs(px - 63.5), Math.abs(py - 63.5)) / 64;
+      const a = 1 - THREE.MathUtils.smoothstep(edge, 0.45, 1);
+      const i = (py * 128 + px) * 4;
+      img.data[i + 3] = a * 128;
+    }
+    x.putImageData(img, 0, 0);
+    return toTexture(c, { repeat: false });
+  }),
+
+  windowLight: () => cached('windowLight', () => {
+    const [c, x] = makeCanvas(256, 256);
+    const img = x.createImageData(256, 256);
+    for (let py = 0; py < 256; py++) for (let px = 0; px < 256; px++) {
+      const u = px / 255, v = py / 255;
+      const edge = Math.min(u, 1 - u) * 24;
+      const fade = Math.sin(v * Math.PI) ** 0.65;
+      const mullion = Math.abs(u - 0.5) < 0.014 ? 0.12 : 1;
+      const i = (py * 256 + px) * 4;
+      img.data[i] = 235; img.data[i + 1] = 211; img.data[i + 2] = 159;
+      img.data[i + 3] = Math.min(1, edge) * fade * mullion * 72;
+    }
+    x.putImageData(img, 0, 0);
+    return toTexture(c, { repeat: false });
   }),
 
   city: () => cached('city', () => {
@@ -315,14 +389,35 @@ export const TEX = {
   }),
 };
 
-// Bump maps reuse the colour canvas but must stay in linear space.
+// Height and roughness are data maps, never sRGB colour. Millimetre-scale bump
+// amplitudes below retain texture detail without turning carpet into deep ridges.
 export function bumpOf(tex) {
   return cached('bump:' + tex.uuid, () => {
-    const t = new THREE.CanvasTexture(tex.image);
-    t.wrapS = t.wrapT = THREE.RepeatWrapping;
-    t.anisotropy = anisotropy;
+    const [c, ctx] = makeCanvas(tex.image.width, tex.image.height);
+    ctx.drawImage(tex.image, 0, 0);
+    const img = ctx.getImageData(0, 0, c.width, c.height);
+    for (let i = 0; i < img.data.length; i += 4) {
+      const value = img.data[i] * 0.2126 + img.data[i + 1] * 0.7152 + img.data[i + 2] * 0.0722;
+      img.data[i] = img.data[i + 1] = img.data[i + 2] = value;
+    }
+    ctx.putImageData(img, 0, 0);
+    const t = toTexture(c, { srgb: false });
     t.userData.meters = tex.userData.meters;
     return t;
+  });
+}
+
+function roughnessOf(tex, base, variation = 0.15) {
+  return cached(`rough:${tex.uuid}:${base}`, () => {
+    const [c, ctx] = makeCanvas(tex.image.width, tex.image.height);
+    ctx.drawImage(bumpOf(tex).image, 0, 0);
+    const img = ctx.getImageData(0, 0, c.width, c.height);
+    for (let i = 0; i < img.data.length; i += 4) {
+      const value = THREE.MathUtils.clamp(base + (img.data[i] / 255 - 0.5) * variation, 0, 1) * 255;
+      img.data[i] = img.data[i + 1] = img.data[i + 2] = value;
+    }
+    ctx.putImageData(img, 0, 0);
+    return toTexture(c, { srgb: false });
   });
 }
 
@@ -331,24 +426,24 @@ export function materials() {
   if (lib) return lib;
   const std = (o) => new THREE.MeshStandardMaterial(o);
   const tex = (t, o = {}) => {
-    const m = std({ map: t, ...o });
+    const m = std({ map: t, ...o, roughnessMap: roughnessOf(t, o.roughness ?? 0.8), roughness: 1 });
     m.userData.meters = t.userData.meters || 1;
     return m;
   };
   lib = {
-    carpet: tex(TEX.carpet(), { roughness: 1, bumpMap: bumpOf(TEX.carpet()), bumpScale: 1.2 }),
-    ceiling: tex(TEX.ceiling(), { roughness: 0.95 }),
-    drywall: tex(TEX.drywall(), { roughness: 0.9, bumpMap: bumpOf(TEX.drywall()), bumpScale: 0.25 }),
-    accentWall: tex(TEX.paintBlue(), { roughness: 0.85 }),
-    wood: tex(TEX.wood(), { roughness: 0.55, metalness: 0 }),
-    darkWood: tex(TEX.darkWood(), { roughness: 0.5 }),
-    concrete: tex(TEX.concrete(), { roughness: 0.92, bumpMap: bumpOf(TEX.concrete()), bumpScale: 1 }),
-    tiles: tex(TEX.tiles(), { roughness: 0.35 }),
-    fabric: tex(TEX.fabric(), { roughness: 1 }),
+    carpet: tex(TEX.carpet(), { roughness: 0.96, bumpMap: bumpOf(TEX.carpet()), bumpScale: 0.025 }),
+    ceiling: tex(TEX.ceiling(), { roughness: 0.94, bumpMap: bumpOf(TEX.ceiling()), bumpScale: 0.015 }),
+    drywall: tex(TEX.drywall(), { roughness: 0.86, bumpMap: bumpOf(TEX.drywall()), bumpScale: 0.008 }),
+    accentWall: tex(TEX.paintBlue(), { roughness: 0.76, bumpMap: bumpOf(TEX.paintBlue()), bumpScale: 0.006 }),
+    wood: tex(TEX.wood(), { roughness: 0.48, metalness: 0, bumpMap: bumpOf(TEX.wood()), bumpScale: 0.006 }),
+    darkWood: tex(TEX.darkWood(), { roughness: 0.46, bumpMap: bumpOf(TEX.wood()), bumpScale: 0.006 }),
+    concrete: tex(TEX.concrete(), { roughness: 0.86, bumpMap: bumpOf(TEX.concrete()), bumpScale: 0.025 }),
+    tiles: tex(TEX.tiles(), { roughness: 0.3, bumpMap: bumpOf(TEX.tiles()), bumpScale: 0.008 }),
+    fabric: tex(TEX.fabric(), { roughness: 0.95, bumpMap: bumpOf(TEX.fabric()), bumpScale: 0.012 }),
     fabricOrange: tex(TEX.fabric(), { roughness: 1, color: 0xffb070 }),
     fabricBlue: tex(TEX.fabric(), { roughness: 1, color: 0x9cc3ff }),
-    metal: tex(TEX.metal(), { roughness: 0.4, metalness: 0.85 }),
-    darkMetal: std({ color: 0x23272e, roughness: 0.45, metalness: 0.7 }),
+    metal: tex(TEX.metal(), { roughness: 0.38, metalness: 0.78, bumpMap: bumpOf(TEX.metal()), bumpScale: 0.003 }),
+    darkMetal: std({ color: 0x343b3b, roughness: 0.53, metalness: 0.6, roughnessMap: roughnessOf(TEX.metal(), 0.8) }),
     blackPlastic: std({ color: 0x15171b, roughness: 0.55, metalness: 0.05 }),
     greyPlastic: std({ color: 0x9aa0a8, roughness: 0.6, metalness: 0.05 }),
     whitePlastic: std({ color: 0xe8e8e4, roughness: 0.5, metalness: 0 }),
@@ -360,16 +455,24 @@ export function materials() {
     plantPot: std({ color: 0x3b3b3b, roughness: 0.8 }),
     leaf: std({ color: 0x2f7a34, roughness: 0.75, side: THREE.DoubleSide }),
     leafDark: std({ color: 0x1e5a25, roughness: 0.8, side: THREE.DoubleSide }),
-    lightPanel: std({ color: 0xffffff, emissive: 0xfff6e8, emissiveIntensity: 2.6, roughness: 0.3 }),
+    lightPanel: std({ map: TEX.lightLens(), emissiveMap: TEX.lightLens(), color: 0xffffff, emissive: 0xfff2d9, emissiveIntensity: 1.8, roughness: 0.42 }),
+    vent: std({ map: TEX.vent(), roughness: 0.64, metalness: 0.28 }),
+    contactShadow: new THREE.MeshBasicMaterial({ map: TEX.contactShadow(), transparent: true, opacity: 0.6, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -1, toneMapped: false }),
+    windowLight: new THREE.MeshBasicMaterial({ map: TEX.windowLight(), transparent: true, opacity: 0.72, depthWrite: false, blending: THREE.AdditiveBlending, polygonOffset: true, polygonOffsetFactor: -1, toneMapped: false }),
+    roomSigns: Object.fromEntries([
+      ['conference', 'CONFERENCE', '04 / 01'], ['reception', 'RECEPTION', '04 / 02'], ['office', 'DIRECTOR', '04 / 03'],
+      ['kitchen', 'BREAK ROOM', '04 / 04'], ['print', 'PRINT & COPY', '04 / 05'], ['server', 'SERVER ACCESS', '04 / 06'],
+      ['garage', 'AUTOMOTIVE', 'WEST / SERVICE'], ['lounge', 'DJB OFFICES', 'EAST / OPERATIONS'],
+    ].map(([key, label, number]) => [key, std({ map: TEX.sign(label, number), roughness: 0.55, metalness: 0.15 })])),
     glass: new THREE.MeshPhysicalMaterial({
-      color: 0xcfe8f5, roughness: 0.04, metalness: 0, transparent: true, opacity: 0.18,
-      envMapIntensity: 1.4, depthWrite: false, side: THREE.DoubleSide,
+      color: 0xc8d9d4, roughness: 0.08, metalness: 0, transparent: true, opacity: 0.13,
+      envMapIntensity: 1.0, depthWrite: false, side: THREE.DoubleSide, forceSinglePass: true,
     }),
     city: new THREE.MeshBasicMaterial({ map: TEX.city(), toneMapped: false, color: 0xd8e2ea }),
-    rack: std({ map: TEX.rack(), emissiveMap: TEX.rack(), emissive: 0xffffff, emissiveIntensity: 1.1, roughness: 0.5, metalness: 0.4 }),
+    rack: std({ map: TEX.rack(), emissiveMap: TEX.rack(), emissive: 0xffffff, emissiveIntensity: 0.55, roughness: 0.5, metalness: 0.4 }),
     whiteboard: std({ map: TEX.whiteboard(), roughness: 0.25 }),
     screens: Array.from({ length: 6 }, (_, i) => std({
-      map: TEX.screen(i), emissiveMap: TEX.screen(i), emissive: 0xffffff, emissiveIntensity: 0.9, roughness: 0.25,
+      map: TEX.screen(i), emissiveMap: TEX.screen(i), emissive: 0xffffff, emissiveIntensity: 0.48, roughness: 0.25,
     })),
     posters: [
       std({ map: TEX.poster('SYNERGY\nOR DEATH', '#0f172a', '#fbbf24'), roughness: 0.6 }),
@@ -379,8 +482,8 @@ export function materials() {
     ],
     logoAuto: new THREE.MeshStandardMaterial({ map: TEX.logo('AUTOMOTIVE', '#ff7a1a'), transparent: true, roughness: 0.5, emissive: 0xff7a1a, emissiveIntensity: 0.25, emissiveMap: TEX.logo('AUTOMOTIVE', '#ff7a1a') }),
     logoDjb: new THREE.MeshStandardMaterial({ map: TEX.logo('DJB', '#2f8cff'), transparent: true, roughness: 0.5, emissive: 0x2f8cff, emissiveIntensity: 0.25, emissiveMap: TEX.logo('DJB', '#2f8cff') }),
-    orangeTrim: std({ color: 0xff7a1a, roughness: 0.5 }),
-    blueTrim: std({ color: 0x2f8cff, roughness: 0.5 }),
+    orangeTrim: std({ color: 0xc67936, roughness: 0.58 }),
+    blueTrim: std({ color: 0x47738b, roughness: 0.58 }),
   };
   return lib;
 }

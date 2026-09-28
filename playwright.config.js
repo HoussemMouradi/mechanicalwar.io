@@ -10,7 +10,7 @@ module.exports = defineConfig({
     viewport: { width: 1280, height: 720 }
   },
   webServer: {
-    command: 'npx http-server . -p 4173 -c-1',
+    command: 'node scripts/serve.cjs',
     url: 'http://127.0.0.1:4173',
     reuseExistingServer: true,
     timeout: 30000

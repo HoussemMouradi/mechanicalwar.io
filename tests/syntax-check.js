@@ -12,7 +12,7 @@ for (const file of files) {
 }
 
 const config = fs.readFileSync('src/config.js', 'utf8');
-for (const weapon of ['glock', 'mp5', 'nova', 'ak47', 'm4a4', 'awp', 'rpg', 'knife']) {
+for (const weapon of ['glock', 'mp5', 'ump45', 'scar', 'nova', 'ak47', 'm4a4', 'awp', 'rpg', 'knife']) {
   if (!new RegExp(`\\b${weapon}\\s*:`).test(config)) throw new Error(`Missing weapon definition: ${weapon}`);
 }
 for (const team of ["key: 'AUTO'", "key: 'DJB'", "key: 'RH'"]) {

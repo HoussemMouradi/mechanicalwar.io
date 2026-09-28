@@ -1,9 +1,10 @@
 import * as THREE from 'three';
 import { TEAMS, WEAPONS, PROPS, SCORE_TO_WIN, charById } from './config.js';
+import { SUPPLIES } from './survival.js';
 
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-export const weaponLabel = w => (w?.startsWith('prop:') ? PROPS[w.slice(5)]?.name : WEAPONS[w]?.name) || w || '?';
+export const weaponLabel = w => (w?.startsWith('prop:') ? PROPS[w.slice(5)]?.name : WEAPONS[w]?.name || SUPPLIES[w]?.name) || w || '?';
 
 export class Hud {
   constructor(world) {
@@ -67,6 +68,40 @@ export class Hud {
     $('hpBar').style.width = Math.max(0, Math.min(100, hp)) + '%';
     $('hpBox').classList.toggle('low', hp <= 25);
   }
+
+  setVitals(me) {
+    const gear = (kind, item) => {
+      $(`${kind}Val`).textContent = item ? Math.ceil(item.hp) : '—';
+      $(`${kind}Bar`).style.width = item ? Math.max(0, Math.min(100, item.hp / item.max * 100)) + '%' : '0%';
+      $(`${kind}State`).textContent = item ? `LV ${item.tier}` : 'NONE';
+      $(`${kind}Stat`).classList.toggle('equipped', !!item);
+    };
+    gear('armor', me.armor); gear('helmet', me.helmet);
+    const boost = Math.max(0, Math.min(100, me.boost || 0));
+    $('boostVal').textContent = Math.ceil(boost);
+    $('boostBar').style.width = boost + '%';
+    $('boostStat').classList.toggle('equipped', boost > 0);
+    for (const item of ['firstaid', 'bandage', 'energy', 'frag', 'smoke']) {
+      const count = me.bag?.[item] || 0;
+      $(`${item}Count`).textContent = count;
+      $(`${item}Count`).closest('.supply-slot').classList.toggle('empty', !count);
+    }
+    for (const [action, count] of [['heal', (me.bag?.firstaid || 0) + (me.bag?.bandage || 0)], ['boost', me.bag?.energy], ['frag', me.bag?.frag], ['smoke', me.bag?.smoke]]) {
+      const button = document.querySelector(`#touch [data-act="${action}"]`);
+      if (button) { button.querySelector('small').textContent = count || 0; button.classList.toggle('empty', !count); }
+    }
+  }
+
+  useProgress(using) {
+    $('useProgress').classList.toggle('show', !!using);
+    if (!using) return;
+    const def = SUPPLIES[using.item];
+    $('useLabel').textContent = `Using ${def?.name || using.item}`;
+    $('useTimer').textContent = Math.max(0, using.remaining).toFixed(1) + 's';
+    $('useBar').style.width = Math.max(0, Math.min(100, (1 - using.remaining / (def?.duration || 1)) * 100)) + '%';
+  }
+
+  smoke(opacity) { $('smokeVeil').style.opacity = opacity.toFixed(3); }
 
   setWeapon(name, ammo, res, melee) {
     $('weaponName').textContent = name;
@@ -207,8 +242,8 @@ export class Hud {
         this.tags.set(p.id, el);
       }
       const bubble = this.bubbles.get(p.id);
-      const showTag = p.team === me.team && p.alive;
-      const showBubble = bubble && now < bubble.until && p.alive;
+      const showTag = p.team === me.team && p.alive && !p.smokeHidden;
+      const showBubble = bubble && now < bubble.until && p.alive && !p.smokeHidden;
       if (!showTag && !showBubble) { el.style.display = 'none'; continue; }
       this.v.set(p.rx, p.ry + (p.crouch ? 1.55 : 2.05), p.rz).project(camera);
       if (this.v.z > 1 || Math.abs(this.v.x) > 1.1 || Math.abs(this.v.y) > 1.1) { el.style.display = 'none'; continue; }

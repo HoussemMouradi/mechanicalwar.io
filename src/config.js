@@ -1,7 +1,9 @@
-export const VERSION = 'mw-office-v4';
+export const VERSION = 'mw-office-v5';
 
 // Everyone lands in the same room: there is no room selection any more.
-export const ROOM_ID = 'mechanicalwar-io-office-main-v4';
+// Gameplay snapshots now include survival items and grenades. Keep older clients
+// in their previous room rather than mixing incompatible match protocols.
+export const ROOM_ID = 'mechanicalwar-io-office-main-v5';
 
 export const MAX_HP = 100;
 export const TEAM_LIMIT = 8;
@@ -61,6 +63,14 @@ export const WEAPONS = {
   mp5: {
     name: 'MP5-SD', slot: 1, dmg: 25, headMult: 3.5, mag: 30, reserve: 120, rate: 0.078, auto: true,
     spread: 0.009, moveSpread: 0.03, kick: 0.55, reload: 2.4, range: 60, speed: 1.0,
+  },
+  ump45: {
+    name: 'UMP-45', slot: 1, dmg: 32, headMult: 3, mag: 25, reserve: 100, rate: 0.105, auto: true,
+    spread: 0.008, moveSpread: 0.04, kick: 0.75, reload: 2.35, range: 55, speed: 0.99,
+  },
+  scar: {
+    name: 'SCAR-L', slot: 1, dmg: 34, headMult: 3.3, mag: 30, reserve: 90, rate: 0.11, auto: true,
+    spread: 0.003, moveSpread: 0.08, kick: 0.95, reload: 2.7, range: 120, speed: 0.91,
   },
   nova: {
     name: 'Nova', slot: 1, dmg: 19, headMult: 2, pellets: 9, mag: 8, reserve: 32, rate: 0.9, auto: false,

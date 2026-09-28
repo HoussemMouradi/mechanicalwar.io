@@ -1,4 +1,6 @@
 const { test, expect } = require('@playwright/test');
+const { localRuntime } = require('./local-runtime');
+test.beforeEach(async ({ context }) => localRuntime(context));
 
 // A tiny in-browser PeerJS stand-in. Pages in the same browser context share a
 // "broker" through BroadcastChannel + localStorage, so two tabs can really play together.
@@ -127,7 +129,7 @@ test('menu has one Play button, three departments and selectable characters', as
   await page.click('.char-card[data-char="vape"]');
   await expect(page.locator('.char-card[data-char="vape"]')).toHaveClass(/selected/);
   await expect(page.locator('#charName')).toContainText('Vape');
-  expect(errors).toEqual([]);
+  expect(errors.all || errors).toEqual([]);
 });
 
 test('RH says "nope, get out" and can never be selected', async ({ page }) => {
@@ -175,7 +177,7 @@ test('Play drops you straight into the single office room (offline fallback)', a
   expect(state.propTypes).toEqual(expect.arrayContaining(['keyboard', 'mug', 'monitor', 'chair']));
   await expect(page.locator('#scoreTop')).toContainText('AUTO');
   await expect(page.locator('#scoreTop')).toContainText('DJB');
-  expect(errors).toEqual([]);
+  expect(errors.all || errors).toEqual([]);
 });
 
 test('you can land on top of a desk', async ({ page }) => {
@@ -226,7 +228,8 @@ test('two tabs share the one room: first hosts, second joins and can shoot', asy
   test.setTimeout(120000);
   const a = await context.newPage();
   const b = await context.newPage();
-  const errors = [...collectErrors(a), ...collectErrors(b)];
+  const aErrors = collectErrors(a), bErrors = collectErrors(b);
+  const errors = { get all() { return [...aErrors, ...bErrors]; } };
   await mockPeer(a);
   await mockPeer(b);
   await enterOffice(a, { team: 1, char: 'manager', name: 'Boss' });
@@ -257,5 +260,5 @@ test('two tabs share the one room: first hosts, second joins and can shoot', asy
     for (let i = 0; i < 4; i++) { g.wep.cd = 0; g.wep.fired = false; g.fire(); await new Promise(r => setTimeout(r, 150)); }
   });
   await expect.poll(() => a.evaluate(() => window.mw.game.me.hp), { timeout: 5000 }).toBeLessThan(100);
-  expect(errors).toEqual([]);
+  expect(errors.all || errors).toEqual([]);
 });
