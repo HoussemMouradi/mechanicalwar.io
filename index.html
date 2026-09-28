@@ -7,12 +7,31 @@
   <meta name="description" content="Mechanical War.io - tactical office warfare in your browser. AUTO vs DJB. No install.">
   <title>mechanical war.io - office warfare</title>
   <link rel="preconnect" href="https://cdn.jsdelivr.net">
-  <link rel="stylesheet" href="styles.css">
+  <!-- Bump this release key for CSS, the entry point, and all local imports together. -->
+  <link rel="stylesheet" href="styles.css?v=20260928-hud1">
   <script type="importmap">
     {
       "imports": {
         "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
-        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/",
+        "./src/audio.js": "./src/audio.js?v=20260928-hud1",
+        "./src/characters.js": "./src/characters.js?v=20260928-hud1",
+        "./src/config.js": "./src/config.js?v=20260928-hud1",
+        "./src/fx.js": "./src/fx.js?v=20260928-hud1",
+        "./src/game.js": "./src/game.js?v=20260928-hud1",
+        "./src/geometry.js": "./src/geometry.js?v=20260928-hud1",
+        "./src/host.js": "./src/host.js?v=20260928-hud1",
+        "./src/hud.js": "./src/hud.js?v=20260928-hud1",
+        "./src/main.js": "./src/main.js?v=20260928-hud1",
+        "./src/menu.js": "./src/menu.js?v=20260928-hud1",
+        "./src/net.js": "./src/net.js?v=20260928-hud1",
+        "./src/props.js": "./src/props.js?v=20260928-hud1",
+        "./src/supplies.js": "./src/supplies.js?v=20260928-hud1",
+        "./src/survival.js": "./src/survival.js?v=20260928-hud1",
+        "./src/textures.js": "./src/textures.js?v=20260928-hud1",
+        "./src/touch.js": "./src/touch.js?v=20260928-hud1",
+        "./src/weapons.js": "./src/weapons.js?v=20260928-hud1",
+        "./src/world.js": "./src/world.js?v=20260928-hud1"
       }
     }
   </script>
@@ -180,9 +199,9 @@
     <div id="selfBubble"></div>
     <div id="useProgress" role="status"><div><span id="useLabel"></span><b id="useTimer"></b></div><div class="use-track"><i id="useBar"></i></div><small>Stay still · fire, move, or press H / B to cancel</small></div>
     <div id="equipment">
-      <div id="armorStat" class="gear-stat"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 2h3v4h4V2h3l4 6-2 3v11H5V11L3 8z"/></svg><span>VEST <small id="armorState">NONE</small></span><b id="armorVal">—</b><div class="gear-track"><i id="armorBar"></i></div></div>
-      <div id="helmetStat" class="gear-stat"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 14v-3a9 9 0 0 1 18 0v3h-5v5h-4v-5zM2 15h9v3H2z"/></svg><span>HELMET <small id="helmetState">NONE</small></span><b id="helmetVal">—</b><div class="gear-track"><i id="helmetBar"></i></div></div>
-      <div id="boostStat" class="gear-stat"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M13 1 3 14h7l-1 9 12-14h-8z"/></svg><span>BOOST <small>REGEN</small></span><b id="boostVal">0</b><div class="gear-track boost-track"><i id="boostBar"></i></div></div>
+      <div id="armorStat" class="gear-stat"><svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 2h3v4h4V2h3l4 6-2 3v11H5V11L3 8z"/></svg><span>VEST <small id="armorState">NONE</small></span><b id="armorVal">—</b><div class="gear-track"><i id="armorBar"></i></div></div>
+      <div id="helmetStat" class="gear-stat"><svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 14v-3a9 9 0 0 1 18 0v3h-5v5h-4v-5zM2 15h9v3H2z"/></svg><span>HELMET <small id="helmetState">NONE</small></span><b id="helmetVal">—</b><div class="gear-track"><i id="helmetBar"></i></div></div>
+      <div id="boostStat" class="gear-stat"><svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><path d="M13 1 3 14h7l-1 9 12-14h-8z"/></svg><span>BOOST <small>REGEN</small></span><b id="boostVal">0</b><div class="gear-track boost-track"><i id="boostBar"></i></div></div>
     </div>
     <div id="supplyBelt" aria-label="Supplies inventory">
       <div class="supply-slot empty" title="First aid: 5 seconds, restores to 75 HP"><kbd>H</kbd><span>FIRST AID</span><b id="firstaidCount">0</b></div>
@@ -192,7 +211,7 @@
       <div class="supply-slot empty" title="Smoke grenade: 16 seconds of cover"><kbd>X</kbd><span>SMOKE</span><b id="smokeCount">0</b></div>
     </div>
     <div id="hpBox">
-      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 2h6v7h7v6h-7v7H9v-7H2V9h7z"/></svg>
+      <svg width="30" height="30" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 2h6v7h7v6h-7v7H9v-7H2V9h7z"/></svg>
       <b id="hpVal">100</b>
       <div class="hpbar"><i id="hpBar"></i></div>
     </div>
@@ -245,6 +264,6 @@
     })();
   </script>
   <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
-  <script type="module" src="src/main.js"></script>
+  <script type="module" src="src/main.js?v=20260928-hud1"></script>
 </body>
 </html>
