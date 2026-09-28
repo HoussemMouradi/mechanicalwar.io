@@ -1,295 +1,261 @@
 const { test, expect } = require('@playwright/test');
 
+// A tiny in-browser PeerJS stand-in. Pages in the same browser context share a
+// "broker" through BroadcastChannel + localStorage, so two tabs can really play together.
 const peerMock = `
-  window.Peer = class {
+(() => {
+  const bc = new BroadcastChannel('mock-peer-broker');
+  const local = new Map();
+  const uid = () => Math.random().toString(36).slice(2, 10);
+  const claimKey = id => 'mockpeer:' + id;
+
+  class Conn {
+    constructor(owner, remote, cid) { this.owner = owner; this.peer = remote; this.cid = cid; this.open = false; this.h = {}; }
+    on(evt, fn) { this.h[evt] = fn; }
+    fire(evt, arg) { this.h[evt]?.(arg); }
+    send(data) { if (this.open) bc.postMessage({ kind: 'data', cid: this.cid, to: this.peer, data }); }
+    close() {
+      if (!this.open) return;
+      this.open = false;
+      bc.postMessage({ kind: 'close', cid: this.cid, to: this.peer });
+      this.fire('close');
+    }
+  }
+
+  class MockPeer {
     constructor(id) {
-      this.id = id || 'test-peer';
-      this.handlers = {};
-      setTimeout(() => this.handlers.open && this.handlers.open(this.id), 20);
+      this.id = id || 'anon-' + uid();
+      this.h = {}; this.conns = new Map(); this.destroyed = false;
+      setTimeout(() => {
+        const owner = localStorage.getItem(claimKey(this.id));
+        if (owner && owner !== this.token) return this.fire('error', { type: 'unavailable-id' });
+        this.token = uid();
+        localStorage.setItem(claimKey(this.id), this.token);
+        local.set(this.id, this);
+        this.fire('open', this.id);
+      }, 30);
     }
-    on(name, cb) { this.handlers[name] = cb; }
-    connect() {
-      const handlers = {};
-      const connection = {
-        open: false,
-        on(name, cb) {
-          handlers[name] = cb;
-          if (name === 'open') setTimeout(() => { connection.open = true; cb(); }, 10);
-        },
-        send(message) {
-          if (message.type === 'join') setTimeout(() => handlers.data && handlers.data({
-            type: 'welcome',
-            players: [{ ...message.player, x: 42, y: 1.7, z: 8, hp: 200, gun: null, ammo: 0, res: 0 }],
-            guns: []
-          }), 10);
-        },
-        close() { connection.open = false; }
-      };
-      return connection;
+    on(evt, fn) { this.h[evt] = fn; }
+    fire(evt, arg) { this.h[evt]?.(arg); }
+    connect(target) {
+      const c = new Conn(this, target, uid());
+      this.conns.set(c.cid, c);
+      bc.postMessage({ kind: 'connect', cid: c.cid, from: this.id, to: target });
+      setTimeout(() => { if (!c.open) c.fire('error', new Error('timeout')); }, 3000);
+      return c;
     }
-    destroy() {}
+    reconnect() {}
+    destroy() {
+      if (this.destroyed) return;
+      this.destroyed = true;
+      for (const c of this.conns.values()) c.close();
+      if (localStorage.getItem(claimKey(this.id)) === this.token) localStorage.removeItem(claimKey(this.id));
+      local.delete(this.id);
+    }
+  }
+
+  bc.onmessage = ({ data: m }) => {
+    const p = local.get(m.to);
+    if (!p || p.destroyed) return;
+    if (m.kind === 'connect') {
+      const c = new Conn(p, m.from, m.cid);
+      p.conns.set(c.cid, c);
+      p.fire('connection', c);
+      c.open = true;
+      bc.postMessage({ kind: 'accept', cid: c.cid, to: m.from });
+      setTimeout(() => c.fire('open'), 0);
+      return;
+    }
+    const c = p.conns.get(m.cid);
+    if (!c) return;
+    if (m.kind === 'accept') { c.open = true; c.fire('open'); }
+    else if (m.kind === 'data') c.fire('data', m.data);
+    else if (m.kind === 'close') { c.open = false; c.fire('close'); }
   };
+  addEventListener('pagehide', () => { for (const p of local.values()) p.destroy(); });
+  window.Peer = MockPeer;
+})();
 `;
 
-test.beforeEach(async ({ page }) => {
-  await page.route('**/*peerjs*.js', route => {
-    route.fulfill({ contentType: 'application/javascript', body: peerMock });
-  });
-});
-
-test('loads the menu without script errors', async ({ page }) => {
+function collectErrors(page) {
   const errors = [];
-  page.on('pageerror', error => errors.push(error.message));
-  page.on('console', message => {
-    if (message.type() === 'error') errors.push(message.text());
-  });
+  page.on('pageerror', e => errors.push(e.message));
+  page.on('console', m => { if (m.type() === 'error') errors.push(m.text()); });
+  return errors;
+}
 
+async function mockPeer(page, { offline = false } = {}) {
+  // Software WebGL in CI is slow; low quality keeps the simulation stepping at a useful rate.
+  await page.addInitScript(() => {
+    localStorage.setItem('mw.settings.v4', JSON.stringify({ sensitivity: 1, fov: 80, quality: 'low', volume: 0 }));
+  });
+  await page.route('**/*peerjs*.js', route => route.fulfill({
+    contentType: 'application/javascript',
+    body: offline ? 'window.Peer = undefined;' : peerMock,
+  }));
+}
+
+async function enterOffice(page, { team = 1, char = 'manager', name = 'Tester' } = {}) {
+  await page.goto('/');
+  await page.fill('#name', name);
+  await page.click(`.team-card[data-team="${team}"]`);
+  await page.click(`.char-card[data-char="${char}"]`);
+  await page.click('#play');
+  await page.waitForFunction(() => window.mw.game?.ready === true, null, { timeout: 25000 });
+  await page.evaluate(() => window.mw.game.setPaused(false));
+}
+
+test('menu has one Play button, three departments and selectable characters', async ({ page }) => {
+  const errors = collectErrors(page);
+  await mockPeer(page);
   await page.goto('/');
   await expect(page.locator('#menu')).toBeVisible();
-  await expect(page.locator('.title')).toHaveText('mechanical war.io');
-  await expect(page.locator('#enter')).toBeVisible();
-  await expect(page.locator('.feature-strip')).toContainText('8 DISTINCT WEAPONS');
+  await expect(page.locator('#play')).toBeVisible();
+  for (const legacy of ['#host', '#join', '#enter', '#quickPlay', '#roomCode', '#rooms']) await expect(page.locator(legacy)).toHaveCount(0);
+  await expect(page.getByText(/quick play|host room|join room/i)).toHaveCount(0);
+
+  const teams = page.locator('.team-card');
+  await expect(teams).toHaveCount(3);
+  await expect(teams.nth(0)).toContainText('AUTO');
+  await expect(teams.nth(1)).toContainText('DJB');
+  await expect(teams.nth(2)).toContainText('RH');
+
+  const chars = page.locator('.char-card');
+  await expect(chars).toHaveCount(6);
+  await expect(page.locator('.char-card[data-char="manager"]')).toContainText('Manager');
+  await expect(page.locator('.char-card[data-char="vape"]')).toContainText('Vape');
+  await page.click('.char-card[data-char="vape"]');
+  await expect(page.locator('.char-card[data-char="vape"]')).toHaveClass(/selected/);
+  await expect(page.locator('#charName')).toContainText('Vape');
   expect(errors).toEqual([]);
 });
 
-test('offers responsive touch controls and all distinct weapons', async ({ page }) => {
+test('RH says "nope, get out" and can never be selected', async ({ page }) => {
+  await mockPeer(page);
   await page.goto('/');
-  const weapons = await page.evaluate(() => Object.fromEntries(
-    ['pistol', 'smg', 'shotgun', 'rifle', 'ak47', 'm4', 'rpg', 'knife']
-      .map(key => [key, { name: GUN[key]?.n, damage: GUN[key]?.d, reload: GUN[key]?.reload }])
-  ));
-  expect(Object.keys(weapons)).toHaveLength(8);
-  expect(new Set(Object.values(weapons).map(weapon => weapon.name)).size).toBe(8);
-  await expect(page.locator('#mobileControls')).toHaveCount(1);
-  await expect(page.locator('.mobile-action.fire')).toHaveText('FIRE');
+  await page.evaluate(() => localStorage.clear());
+  await page.reload();
+  await page.click('.team-card[data-team="rh"]');
+  await expect(page.locator('#denied')).toBeVisible();
+  await expect(page.locator('#denied')).toContainText('nope, get out');
+  await expect(page.locator('.team-card[data-team="rh"]')).not.toHaveClass(/selected/);
+  expect(await page.evaluate(() => window.mw.menu.profile.team)).not.toBe('rh');
+
+  await page.click('#play');
+  await expect(page.locator('#menu')).toBeVisible();
+  await expect(page.locator('#menuMsg')).toContainText(/AUTO or DJB/);
+
+  await page.click('.team-card[data-team="2"]');
+  await expect(page.locator('.team-card[data-team="2"]')).toHaveClass(/selected/);
 });
 
-test('joins an existing room through the client handshake', async ({ page }) => {
-  const errors = [];
-  page.on('pageerror', error => errors.push(error.message));
-  await page.goto('/');
-  await page.locator('#name').fill('Joiner');
-  await page.locator('#team2').click();
-  await page.locator('#join').click();
-
-  await expect(page.locator('#hud')).toBeVisible({ timeout: 10000 });
-  await expect(page.locator('#netRole')).toContainText('CLIENT');
-  await expect(page.locator('canvas')).toHaveCount(1);
-  expect(errors).toEqual([]);
-});
-
-test('enters a rendered office scene with the mocked host', async ({ page }) => {
-  const errors = [];
-  page.on('pageerror', error => errors.push(error.message));
-
-  await page.goto('/');
-  await page.locator('#name').fill('Tester');
-  await page.locator('#team1').click();
-  await page.locator('#enter').click();
-
-  await expect.poll(
-    () => page.evaluate(() => !document.getElementById('hud').classList.contains('hide')),
-    { timeout: 10000 }
-  ).toBe(true);
-  await expect(page.locator('#loading')).toBeHidden();
-  await expect(page.locator('canvas')).toHaveCount(1);
-  await expect(page.locator('#held')).toHaveText('Unarmed');
-
-  await page.waitForTimeout(500);
-  const canvasSize = await page.evaluate(() => {
-    const canvas = document.querySelector('canvas');
-    return canvas ? { width: canvas.clientWidth, height: canvas.clientHeight } : null;
+test('Play drops you straight into the single office room (offline fallback)', async ({ page }) => {
+  const errors = collectErrors(page);
+  await mockPeer(page, { offline: true });
+  await enterOffice(page, { team: 2, char: 'vape' });
+  await expect(page.locator('#hud')).toBeVisible();
+  await expect(page.locator('#menu')).toBeHidden();
+  const state = await page.evaluate(() => {
+    const g = window.mw.game;
+    return {
+      role: g.role, team: g.me.team, char: g.me.char, hp: g.me.hp,
+      colliders: g.world.colliders.length, props: g.props.size, guns: g.guns.size,
+      desks: g.world.colliders.filter(c => Math.abs(c.y + c.hy - 0.75) < 0.03 && c.hx > 0.5).length,
+      propTypes: [...new Set([...g.props.values()].map(p => p.type))],
+    };
   });
-  expect(canvasSize.width).toBeGreaterThan(1000);
-  expect(canvasSize.height).toBeGreaterThan(600);
-  const world = await page.evaluate(() => ({
-    obstacles: obs.length,
-    guns: guns.length,
-    farSpawn: Math.abs(spawn(2).x),
-    teamOneYaw: spawn(1).yaw,
-    teamTwoYaw: spawn(2).yaw,
-    ambient: scene.children.find(object => object.isAmbientLight)?.intensity,
-    hemisphere: scene.children.find(object => object.isHemisphereLight)?.intensity,
-    fogNear: scene.fog?.near,
-    exposure: renderer.toneMappingExposure
+  expect(state.role).toBe('offline');
+  expect(state.team).toBe(2);
+  expect(state.char).toBe('vape');
+  expect(state.hp).toBe(100);
+  expect(state.colliders).toBeGreaterThan(150);
+  expect(state.desks).toBeGreaterThanOrEqual(8);
+  expect(state.guns).toBeGreaterThan(5);
+  expect(state.props).toBeGreaterThan(40);
+  expect(state.propTypes).toEqual(expect.arrayContaining(['keyboard', 'mug', 'monitor', 'chair']));
+  await expect(page.locator('#scoreTop')).toContainText('AUTO');
+  await expect(page.locator('#scoreTop')).toContainText('DJB');
+  expect(errors).toEqual([]);
+});
+
+test('you can land on top of a desk', async ({ page }) => {
+  await mockPeer(page, { offline: true });
+  await enterOffice(page);
+  await page.evaluate(() => {
+    const g = window.mw.game;
+    const desk = g.world.colliders.find(c => Math.abs(c.y + c.hy - 0.75) < 0.03 && c.hx > 0.5 && c.hz > 0.3);
+    window.testDesk = desk;
+    g.me.pos.set(desk.x, 1.6, desk.z);
+    g.me.vel.set(0, 0, 0);
+    g.me.onGround = false;
+  });
+  await page.waitForFunction(() => window.mw.game.me.onGround, null, { timeout: 15000 });
+  const top = await page.evaluate(() => {
+    const g = window.mw.game, desk = window.testDesk;
+    return { y: g.me.pos.y, onGround: g.me.onGround, deskTop: desk.y + desk.hy };
+  });
+  expect(top.onGround).toBe(true);
+  expect(Math.abs(top.y - top.deskTop)).toBeLessThan(0.05);
+});
+
+test('office props can be grabbed and thrown', async ({ page }) => {
+  await mockPeer(page, { offline: true });
+  await enterOffice(page);
+  const result = await page.evaluate(async () => {
+    const g = window.mw.game;
+    const wait = ms => new Promise(r => setTimeout(r, ms));
+    const prop = [...g.props.values()].find(p => p.type === 'keyboard' && p.state === 'rest');
+    const start = { x: prop.x, z: prop.z };
+    g.me.pos.set(prop.x + 1, 0, prop.z);
+    g.me.yaw = Math.PI / 2;
+    await wait(300);
+    g.request({ type: 'grab', id: prop.id });
+    await wait(200);
+    const held = g.me.prop?.id === prop.id && g.me.slot === 'prop';
+    g.throwProp(1);
+    await wait(2500);
+    return { held, state: prop.state, moved: Math.hypot(prop.x - start.x, prop.z - start.z), stillHolding: !!g.me.prop };
+  });
+  expect(result.held).toBe(true);
+  expect(result.stillHolding).toBe(false);
+  expect(result.state).toBe('rest');
+  expect(result.moved).toBeGreaterThan(1.5);
+});
+
+test('two tabs share the one room: first hosts, second joins and can shoot', async ({ context }) => {
+  test.setTimeout(120000);
+  const a = await context.newPage();
+  const b = await context.newPage();
+  const errors = [...collectErrors(a), ...collectErrors(b)];
+  await mockPeer(a);
+  await mockPeer(b);
+  await enterOffice(a, { team: 1, char: 'manager', name: 'Boss' });
+  await enterOffice(b, { team: 2, char: 'vape', name: 'Cloud' });
+
+  expect(await a.evaluate(() => window.mw.game.role)).toBe('host');
+  expect(await b.evaluate(() => window.mw.game.role)).toBe('client');
+  await expect.poll(() => a.evaluate(() => [...window.mw.game.remotes.values()].map(r => r.name))).toContain('Cloud');
+  await expect.poll(() => b.evaluate(() => [...window.mw.game.remotes.values()].map(r => r.name))).toContain('Boss');
+
+  await a.evaluate(() => { const g = window.mw.game; g.me.pos.set(0, 0, -6); g.me.yaw = 0; });
+  await b.evaluate(() => { const g = window.mw.game; g.me.pos.set(0, 0, -1); g.me.yaw = 0; g.me.pitch = -0.08; });
+  await expect.poll(() => b.evaluate(() => {
+    const r = [...window.mw.game.remotes.values()][0];
+    return Math.abs(r.rz + 6) < 0.3;
+  })).toBe(true);
+  console.log(await b.evaluate(() => {
+    const g = window.mw.game, o = g.camera.position.clone(), d = g.forward();
+    const wall = g.castWorld(o, d, 100), r = [...g.remotes.values()][0];
+    const t = g.castPlayers(o, d, wall.dist);
+    return JSON.stringify({ o, d, wall: wall.dist, t: t && t.t, r: [r.rx, r.ry, r.rz, r.alive, r.team], me: g.me.team, head: r.rig.head.getWorldPosition(o.clone()) });
   }));
-  expect(world.obstacles).toBeGreaterThan(30);
-  expect(world.guns).toBeGreaterThanOrEqual(16);
-  expect(world.farSpawn).toBeGreaterThan(33);
-  expect(world.teamOneYaw).toBeLessThan(0);
-  expect(world.teamTwoYaw).toBeGreaterThan(0);
-  expect(world.ambient).toBeGreaterThanOrEqual(0.7);
-  expect(world.hemisphere).toBeGreaterThanOrEqual(1.7);
-  expect(world.fogNear).toBeGreaterThanOrEqual(75);
-  expect(world.exposure).toBeGreaterThanOrEqual(1.6);
-  expect(errors).toEqual([]);
-});
-
-test('first-person weapon points forward toward the crosshair', async ({ page }) => {
-  await page.goto('/');
-  await page.locator('#name').fill('Weapon Tester');
-  await page.locator('#team1').click();
-  await page.locator('#enter').click();
-  await expect(page.locator('#loading')).toBeHidden({ timeout: 10000 });
-
-  const orientation = await page.evaluate(() => {
-    me.gun = 'm4';
-    me.ammo = GUN.m4.mag;
-    me.res = GUN.m4.res;
-    drawHand(true);
-    const view = hand.children[0];
-    const model = view.children[0];
-    return {
-      axis: model.userData.forwardAxis,
-      modelYaw: model.rotation.y,
-      viewYaw: view.rotation.y
-    };
+  // The host only accepts primary-weapon hits for guns it granted, so shoot with the spawn Glock.
+  await b.evaluate(async () => {
+    const g = window.mw.game;
+    g.equip('secondary', true);
+    g.wep.drawT = 0;
+    for (let i = 0; i < 4; i++) { g.wep.cd = 0; g.wep.fired = false; g.fire(); await new Promise(r => setTimeout(r, 150)); }
   });
-
-  expect(orientation.axis).toBe('-z');
-  expect(orientation.modelYaw).toBeCloseTo(Math.PI / 2, 5);
-  expect(Math.abs(orientation.viewYaw)).toBeLessThan(0.25);
-});
-
-test('host pickup remains authoritative after another player joins', async ({ page }) => {
-  await page.goto('/');
-  await page.locator('#name').fill('Pickup Host');
-  await page.locator('#team1').click();
-  await page.locator('#enter').click();
-  await expect(page.locator('#loading')).toBeHidden({ timeout: 10000 });
-
-  const result = await page.evaluate(() => {
-    const sent = [];
-    const remoteId = 'remote-player';
-    players.set(remoteId, {
-      id: remoteId, name: 'Remote', team: 2, x: 42, y: 1.7, z: 8,
-      yaw: 1.57, pitch: 0, hp: 200, gun: null, ammo: 0, res: 0, last: Date.now()
-    });
-    conns.set(remoteId, { open: true, send: message => sent.push(structuredClone(message)), close() {} });
-    const gun = guns.find(item => !item.heldBy);
-    me.x = gun.x;
-    me.z = gun.z;
-    players.set(myId, pack());
-    pickup();
-    const gunSync = sent.find(message => message.type === 'guns');
-    return {
-      equipped: me.gun,
-      heldBy: gun.heldBy,
-      syncedHeldBy: gunSync?.guns.find(item => item.id === gun.id)?.heldBy,
-      remoteSawBulk: sent.some(message => message.type === 'bulk')
-    };
-  });
-
-  expect(result.equipped).toBeTruthy();
-  expect(result.heldBy).toBe(await page.evaluate(() => myId));
-  expect(result.syncedHeldBy).toBe(result.heldBy);
-  expect(result.remoteSawBulk).toBe(true);
-});
-
-test('host rejects remote pickup contention and impossible distance', async ({ page }) => {
-  await page.goto('/');
-  await page.locator('#name').fill('Validation Host');
-  await page.locator('#team1').click();
-  await page.locator('#enter').click();
-  await expect(page.locator('#loading')).toBeHidden({ timeout: 10000 });
-
-  const result = await page.evaluate(() => {
-    const gun = guns.find(item => !item.heldBy);
-    const remote = { id: 'remote', name: 'Remote', team: 2, x: 42, y: 1.7, z: 8, hp: 200, gun: null, ammo: 0, res: 0, last: Date.now() };
-    const replies = [];
-    const connection = { open: true, send: message => replies.push(structuredClone(message)) };
-    players.set(remote.id, remote);
-    hostPickup({ pid: remote.id, id: gun.id, x: gun.x, z: gun.z }, connection);
-    const distanceDenied = replies.at(-1)?.type === 'pickup_denied';
-    remote.x = gun.x;
-    remote.z = gun.z;
-    replies.length = 0;
-    hostPickup({ pid: remote.id, id: gun.id, x: gun.x, z: gun.z }, connection);
-    const picked = gun.heldBy === remote.id;
-    const contender = { id: 'contender', name: 'Contender', team: 2, x: gun.x, y: 1.7, z: gun.z, hp: 200, gun: null, ammo: 0, res: 0, last: Date.now() };
-    players.set(contender.id, contender);
-    replies.length = 0;
-    hostPickup({ pid: contender.id, id: gun.id, x: gun.x, z: gun.z }, connection);
-    return { distanceDenied, picked, contentionDenied: replies.at(-1)?.type === 'pickup_denied', owner: gun.heldBy };
-  });
-
-  expect(result).toEqual({ distanceDenied: true, picked: true, contentionDenied: true, owner: 'remote' });
-});
-
-test('respawns in the same room after elimination', async ({ page }) => {
-  const errors = [];
-  page.on('pageerror', error => errors.push(error.message));
-
-  await page.goto('/');
-  await page.locator('#name').fill('Respawner');
-  await page.locator('#team1').click();
-  await page.locator('#enter').click();
-
-  await expect.poll(
-    () => page.evaluate(() => !document.getElementById('hud').classList.contains('hide')),
-    { timeout: 10000 }
-  ).toBe(true);
-  await page.evaluate(() => damage(250, 'Test enemy'));
-  await expect(page.locator('#dead')).toBeVisible();
-  await expect(page.locator('#hp')).toHaveText('0');
-  await expect(page.locator('#respawn')).toBeVisible();
-
-  const respawned = await page.evaluate(() => {
-    respawn();
-    return {
-      deadHidden: document.getElementById('dead').classList.contains('hide'),
-      hudVisible: !document.getElementById('hud').classList.contains('hide'),
-      hp: document.getElementById('hp').textContent,
-      held: document.getElementById('held').textContent,
-      feed: document.getElementById('feed').textContent
-    };
-  });
-  expect(respawned).toEqual({
-    deadHidden: true,
-    hudVisible: true,
-    hp: '200',
-    held: 'Unarmed',
-    feed: expect.stringContaining('Respawned')
-  });
-  expect(errors).toEqual([]);
-});
-
-test('host bulk sync can clear a dropped weapon', async ({ page }) => {
-  const errors = [];
-  page.on('pageerror', error => errors.push(error.message));
-
-  await page.goto('/');
-  await page.locator('#name').fill('Dropper');
-  await page.locator('#team1').click();
-  await page.locator('#enter').click();
-
-  await expect.poll(
-    () => page.evaluate(() => !document.getElementById('hud').classList.contains('hide')),
-    { timeout: 10000 }
-  ).toBe(true);
-
-  const dropped = await page.evaluate(() => {
-    me.gun = 'ak47';
-    me.ammo = GUN.ak47.mag;
-    me.res = GUN.ak47.res;
-    players.set(myId, pack());
-    handle({
-      type: 'bulk',
-      players: [{ ...pack(), gun: null, ammo: 0, res: 0 }]
-    });
-    return {
-      gun: me.gun,
-      ammo: document.getElementById('ammo').textContent,
-      res: document.getElementById('res').textContent,
-      held: document.getElementById('held').textContent
-    };
-  });
-
-  expect(dropped).toEqual({
-    gun: null,
-    ammo: '0',
-    res: '0',
-    held: 'Unarmed'
-  });
+  await expect.poll(() => a.evaluate(() => window.mw.game.me.hp), { timeout: 5000 }).toBeLessThan(100);
   expect(errors).toEqual([]);
 });

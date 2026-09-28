@@ -1,24 +1,22 @@
 const fs = require('fs');
-const vm = require('vm');
+const path = require('path');
+const { execFileSync } = require('child_process');
 
 const html = fs.readFileSync('index.html', 'utf8');
-const scripts = [...html.matchAll(/<script(?:\s[^>]*)?>([\s\S]*?)<\/script>/gi)].map(match => match[1]);
-const localSources = [...html.matchAll(/<script[^>]+src=["'](?!https?:\/\/)([^"']+)["'][^>]*>/gi)]
-  .map(match => fs.readFileSync(match[1], 'utf8'));
-const allSources = [...scripts, ...localSources];
+if (!/<script type="module" src="src\/main\.js">/.test(html)) throw new Error('index.html does not load src/main.js');
+if (!/"three":/.test(html)) throw new Error('index.html is missing the three.js import map');
 
-if (!scripts.length) {
-  throw new Error('No inline game script found in index.html');
+const files = fs.readdirSync('src').filter(f => f.endsWith('.js')).map(f => path.join('src', f));
+for (const file of files) {
+  execFileSync(process.execPath, ['--input-type=module', '--check'], { input: fs.readFileSync(file) });
 }
 
-for (const source of allSources) {
-  new vm.Script(source);
+const config = fs.readFileSync('src/config.js', 'utf8');
+for (const weapon of ['glock', 'mp5', 'nova', 'ak47', 'm4a4', 'awp', 'rpg', 'knife']) {
+  if (!new RegExp(`\\b${weapon}\\s*:`).test(config)) throw new Error(`Missing weapon definition: ${weapon}`);
+}
+for (const team of ["key: 'AUTO'", "key: 'DJB'", "key: 'RH'"]) {
+  if (!config.includes(team)) throw new Error(`Missing team: ${team}`);
 }
 
-for (const weapon of ['ak47', 'm4', 'rpg', 'knife']) {
-  if (!allSources.some(source => new RegExp(`\\b${weapon}\\s*:`).test(source))) {
-    throw new Error(`Missing weapon definition: ${weapon}`);
-  }
-}
-
-console.log(`Validated ${scripts.length} inline and ${localSources.length} local script blocks.`);
+console.log(`Syntax OK for ${files.length} modules.`);
