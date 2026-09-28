@@ -113,6 +113,8 @@ Then open `http://127.0.0.1:4173` (open two tabs to play against yourself).
 
 GitHub Pages can serve the repository root directly; all local assets use relative paths. A network connection is required on first load for the CDN runtimes, and the public PeerJS broker plus WebRTC connectivity are required for multiplayer.
 
+When publishing CSS or JavaScript changes, update the `?v=` release key throughout `index.html` (stylesheet, module entry point, and local import-map entries). Keep every local module in that map; `npm test` checks that the release keys agree. This prevents a fresh page from reusing incompatible cached assets. HUD icons also have intrinsic dimensions so a missing or stale stylesheet cannot enlarge them over the game. If an already-open tab shows the old HUD after deployment, reload with Ctrl+Shift+R (Cmd+Shift+R on macOS).
+
 ## Known limitations
 
 - WebRTC may fail on restrictive networks without a dedicated TURN relay.
