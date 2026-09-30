@@ -23,8 +23,8 @@ export function createOfficeEnvironment(renderer) {
     mesh.position.set(x, y, z); mesh.scale.set(w, h, d);
     stage.add(mesh);
   }
-  box(0xc5c5b8, 0.22, 0, 0, 0, 28, 8, 22);
-  box(0x625b48, 0.14, 0, -3.9, 0, 28, 0.1, 22);
+  box(0xc5c5b8, 0.9, 0, 0, 0, 28, 8, 22);
+  box(0x9b9988, 0.75, 0, -3.9, 0, 28, 0.1, 22);
   for (const z of [-10.9, 10.9]) box(0xb6d9ed, 1.25, 0, 0.7, z, 25, 2.3, 0.05);
   for (const x of [-8, 0, 8]) for (const z of [-6, 0, 6]) box(0xfff0cf, 3.2, x, 3.85, z, 3, 0.05, 0.7);
   const generator = new THREE.PMREMGenerator(renderer);

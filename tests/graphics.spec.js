@@ -135,6 +135,14 @@ test('matched-camera high-quality review screenshots', async ({ browser }, testI
   const context = await browser.newContext({ viewport: { width: 1280, height: 720 } });
   const page = await context.newPage();
   await launch(page, context, 'high');
+  const renderTime = async target => target.evaluate(() => {
+    const g = window.mw.game, gl = g.renderer.getContext();
+    g.render(); gl.finish();
+    const samples = [];
+    for (let i = 0; i < 3; i++) { const start = performance.now(); g.render(); gl.finish(); samples.push(performance.now() - start); }
+    return { samplesMs: samples, vendor: gl.getParameter(gl.VERSION), preset: g.settings.quality, resolution: [g.renderer.domElement.width, g.renderer.domElement.height] };
+  });
+  const timings = { after: await renderTime(page) };
   await page.screenshot({ path: testInfo.outputPath('office-after.png') });
   await page.evaluate(() => {
     const g = window.mw.game;
@@ -155,6 +163,7 @@ test('matched-camera high-quality review screenshots', async ({ browser }, testI
     });
     const oldPage = await baseline.newPage();
     await launch(oldPage, baseline, 'high');
+    timings.before = await renderTime(oldPage);
     await oldPage.screenshot({ path: testInfo.outputPath('office-before.png') });
     await oldPage.evaluate(() => {
       const g = window.mw.game;
@@ -164,4 +173,5 @@ test('matched-camera high-quality review screenshots', async ({ browser }, testI
     await oldPage.screenshot({ path: testInfo.outputPath('kitchen-before.png') });
     await baseline.close();
   }
+  await testInfo.attach('matched-render-timings', { body: JSON.stringify(timings, null, 2), contentType: 'application/json' });
 });

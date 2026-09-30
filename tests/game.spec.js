@@ -104,7 +104,14 @@ async function enterOffice(page, { team = 1, char = 'manager', name = 'Tester' }
   await page.click(`.char-card[data-char="${char}"]`);
   await page.click('#play');
   await page.waitForFunction(() => window.mw.game?.ready === true, null, { timeout: 25000 });
-  await page.evaluate(() => window.mw.game.setPaused(false));
+  await page.evaluate(() => {
+    const g = window.mw.game;
+    g.setPaused(false);
+    // These tests assert input, simulation, model transforms, network and HUD.
+    // The dedicated graphics suite submits full frames for every quality preset.
+    // Avoid tying real-time gameplay timers to a CI software GPU's frame time.
+    g.render = () => {};
+  });
 }
 
 test('menu has one Play button, three departments and selectable characters', async ({ page }) => {
@@ -215,7 +222,9 @@ test('office props can be grabbed and thrown', async ({ page }) => {
     await wait(200);
     const held = g.me.prop?.id === prop.id && g.me.slot === 'prop';
     g.throwProp(1);
-    await wait(2500);
+    // Advance real host physics in bounded steps instead of assuming that a
+    // software-rendered tab can simulate 2.5 seconds in 2.5 wall-clock seconds.
+    for (let frame = 0; frame < 360 && g.host.props.get(prop.id).state === 'fly'; frame++) g.host.simulateProps(1 / 60);
     return { held, state: prop.state, moved: Math.hypot(prop.x - start.x, prop.z - start.z), stillHolding: !!g.me.prop };
   });
   expect(result.held).toBe(true);

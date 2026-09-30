@@ -130,9 +130,13 @@ npm start
 `npm test` runs module syntax checks, host-authority tests and Playwright gameplay tests against a mocked PeerJS broker. Coverage includes existing movement/props/multiplayer, armor, healing/boost, grenade physics and cover, smoke lifetime, new weapons, and late joins. Browser tests use a pinned local copy of Three.js, so CDN outages do not affect the results. Production still uses the static import map. Graphics regressions additionally cover all
 four presets, high-DPI resize, scope/FOV projection, smoke/transparency preservation,
 mobile controls, material-map caching, and render budgets. The pull-request workflow
-runs the suite and retains `game-test-results` for seven days, including matched-camera
+runs assets/authority, gameplay and graphics in parallel and retains `game-test-results-*` for seven days, including matched-camera
 before/after office and kitchen screenshots when a PR base commit is available.
 Screenshots are review evidence, not pixel-perfect golden-image assertions.
+Gameplay tests retain real input/network/HUD checks but skip repeated GPU draws after
+match startup; graphics tests independently submit full frames. Prop/reload timers
+are advanced through the production simulation functions rather than wall-clock
+sleeps, so slow software rendering cannot decide whether a gameplay test passes.
 
 If Chromium is already installed in a constrained development environment, set
 `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH` to its executable path. Otherwise use the pinned
