@@ -24,7 +24,7 @@ export function buildWorld(scene, quality) {
   const frost = new THREE.MeshStandardMaterial({ color: 0xf1f5f9, roughness: 0.6, transparent: true, opacity: 0.55, depthWrite: false });
   const carpetBlue = M.carpet.clone(); carpetBlue.color = new THREE.Color(0xa8b6b7); carpetBlue.userData.meters = 2;
   const carpetWarm = M.carpet.clone(); carpetWarm.color = new THREE.Color(0xc6bc9f); carpetWarm.userData.meters = 2;
-  const stone = new THREE.MeshStandardMaterial({ color: 0xbab9ae, roughness: 0.31, bumpMap: M.concrete.bumpMap, bumpScale: 0.004 });
+  const stone = new THREE.MeshStandardMaterial({ color: 0xbab9ae, roughness: 0.31, normalMap: M.concrete.normalMap, normalScale: new THREE.Vector2(0.25, 0.25) });
   const tv = new THREE.MeshStandardMaterial({ map: M.screens[2].map, emissiveMap: M.screens[2].map, emissive: 0xffffff, emissiveIntensity: 0.7, roughness: 0.2 });
   const vend = new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: 0x9fd7ff, emissiveIntensity: 0.9, roughness: 0.3 });
   const rubber = new THREE.MeshStandardMaterial({ color: 0x151515, roughness: 0.9 });

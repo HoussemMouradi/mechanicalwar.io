@@ -1,5 +1,4 @@
 import * as THREE from 'three';
-import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
@@ -20,6 +19,7 @@ import { setAnisotropy } from './textures.js';
 import { TouchControls, isTouchDevice } from './touch.js';
 import { SUPPLIES } from './survival.js';
 import { buildSupply, disposeSupply, SmokeEffects } from './supplies.js';
+import { createOfficeEnvironment, OfficeAOPass, renderPixelRatio } from './graphics.js';
 
 const RADIUS = 0.3, STAND_H = 1.8, CROUCH_H = 1.25, EYE_STAND = 1.64, EYE_CROUCH = 1.12;
 const GRAVITY = 20, JUMP_V = 6.6, STEP = 0.36, RUN_SPEED = 6.0;
@@ -27,16 +27,6 @@ const INTERACT_RANGE = 2.5;
 const now = () => performance.now();
 const v3 = () => new THREE.Vector3();
 const _head = new THREE.Vector3();
-
-// RoomEnvironment is tuned for product shots; indoors it flattens everything, so scale all its emitters.
-function dimmedRoom(renderer, k) {
-  const room = new RoomEnvironment(renderer);
-  room.traverse(o => {
-    if (o.isLight) o.intensity *= k;
-    else if (o.material?.isMeshBasicMaterial) o.material.color.multiplyScalar(k);
-  });
-  return room;
-}
 
 export class Game {
   constructor({ profile, settings, onStatus, onFail, onPauseChange }) {
@@ -103,8 +93,8 @@ export class Game {
 
   initRenderer() {
     const q = this.quality;
-    this.renderer = new THREE.WebGLRenderer({ antialias: q.aa && !q.post, powerPreference: 'high-performance', stencil: false });
-    this.renderer.setPixelRatio(Math.min(devicePixelRatio, q.pixelRatio));
+    this.renderer = new THREE.WebGLRenderer({ antialias: q.aa, powerPreference: 'high-performance', stencil: false });
+    this.renderer.setPixelRatio(renderPixelRatio(q, innerWidth, innerHeight, devicePixelRatio));
     this.renderer.setSize(innerWidth, innerHeight);
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -113,12 +103,12 @@ export class Game {
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     this.renderer.domElement.id = 'game';
     document.body.prepend(this.renderer.domElement);
-    setAnisotropy(Math.min(8, this.renderer.capabilities.getMaxAnisotropy()));
+    setAnisotropy(Math.min(q.anisotropy, this.renderer.capabilities.getMaxAnisotropy()));
 
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color(0x9cb8d0);
-    const pmrem = new THREE.PMREMGenerator(this.renderer);
-    this.envMap = pmrem.fromScene(dimmedRoom(this.renderer, 0.4), 0.04).texture;
+    this.environmentTarget = createOfficeEnvironment(this.renderer);
+    this.envMap = this.environmentTarget.texture;
     this.scene.environment = this.envMap;
 
     this.camera = new THREE.PerspectiveCamera(this.settings.fov, innerWidth / innerHeight, 0.05, 400);
@@ -136,26 +126,34 @@ export class Game {
     rim.position.set(-1, 0.3, -0.6);
     this.viewScene.add(rim);
 
-    if (q.post) {
-      const size = this.renderer.getDrawingBufferSize(new THREE.Vector2());
-      const rt = new THREE.WebGLRenderTarget(size.x, size.y, { type: THREE.HalfFloatType, samples: 4 });
+    // HDR/AO needs renderable half floats. Older/mobile GPUs retain the direct
+    // renderer, materials and native AA rather than failing to enter a match.
+    if (q.post && this.renderer.capabilities.isWebGL2 && this.renderer.extensions.has('EXT_color_buffer_float')) {
+      const rt = new THREE.WebGLRenderTarget(innerWidth, innerHeight, { type: THREE.HalfFloatType, samples: Math.min(4, this.renderer.capabilities.maxSamples) });
       this.composer = new EffectComposer(this.renderer, rt);
       this.composer.addPass(new RenderPass(this.scene, this.camera));
+      this.aoPass = new OfficeAOPass(this.scene, this.camera, q);
+      this.composer.addPass(this.aoPass);
+      // Bloom belongs to bright fixtures/screens, before hands and gun are drawn.
+      this.composer.addPass(new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.12, 0.45, 1.05));
       const vp = new RenderPass(this.viewScene, this.viewCamera);
       vp.clear = false;
       vp.clearDepth = true;
       this.composer.addPass(vp);
-      this.composer.addPass(new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.15, 0.5, 0.92));
       this.composer.addPass(new OutputPass());
+      this.composer.setSize(innerWidth, innerHeight);
     } else {
       this.renderer.autoClear = false;
     }
     this.onResize = () => {
-      this.renderer.setSize(innerWidth, innerHeight);
-      this.composer?.setSize(innerWidth, innerHeight);
       this.camera.aspect = this.viewCamera.aspect = innerWidth / innerHeight;
       this.camera.updateProjectionMatrix();
       this.viewCamera.updateProjectionMatrix();
+      const ratio = renderPixelRatio(q, innerWidth, innerHeight, devicePixelRatio);
+      this.renderer.setPixelRatio(ratio);
+      this.renderer.setSize(innerWidth, innerHeight);
+      this.composer?.setPixelRatio(ratio);
+      this.composer?.setSize(innerWidth, innerHeight);
     };
     addEventListener('resize', this.onResize);
   }

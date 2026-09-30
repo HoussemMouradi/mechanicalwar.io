@@ -71,6 +71,33 @@ Graphics use original procedural assets: worn carpet and wall surfaces, separate
 
 The new gameplay protocol uses the v5 room so old clients cannot accidentally join an incompatible match. Host migration starts a fresh survival state; armor, consumables, boost and active grenades do not transfer to the newly elected host.
 
+## Visual fidelity update
+
+The office now uses physical surface detail instead of deriving relief from paint color:
+carpet fibers and seams, wood pores, concrete aggregate and joints, recessed ceramic
+grout, and brushed metal. Normal/roughness maps are deterministic, generated once,
+shared across materials, and require no texture downloads. Ceramic checker colors
+no longer incorrectly change the height of the tiles.
+
+High and Ultra add subtle screen-space ambient occlusion around desk legs, frames
+and room corners. Glass, smoke and floor decals are excluded from the depth pass;
+first-person hands/weapons and the HUD are drawn after AO and bloom to stay crisp.
+A small generated office reflection environment adds cool window bands and warm
+ceiling-strip highlights on metal, glass and weapons. It is baked once at startup.
+
+- Low: all material upgrades, baked contact shadows, no dynamic shadows/postprocessing
+- Medium: materials and dynamic shadows, native antialiasing, no AO/postprocessing
+- High: half-resolution 16-sample AO, restrained HDR bloom, up to 8x anisotropy
+- Ultra: 32-sample AO at 75% resolution, up to 16x anisotropy; AO width/height capped at 1600
+
+Physical render pixels are capped per preset (1.6/2.4/3.6/6 megapixels), including
+on resize, to avoid unexpectedly large retina/4K buffers. Composer targets use the
+same resolution as the drawing buffer; DPR is no longer applied twice to effect
+passes at startup. GPUs without WebGL2/float color-buffer support fall back to the
+direct renderer rather than attempting the HDR/AO pipeline. Quality changes still
+apply on the next match. Gameplay, cover, multiplayer protocol and touch controls
+are unchanged.
+
 ## Architecture
 
 No build step: plain ES modules, three.js 0.160 via an import map and PeerJS 1.5 from CDN.
@@ -83,6 +110,7 @@ No build step: plain ES modules, three.js 0.160 via an import map and PeerJS 1.5
 - `src/net.js` manages the single fixed room: host-or-join, retries, offline fallback and host-loss signalling.
 - `src/world.js` builds the office map (desks, colliders you can stand on, lighting, radar data). It uses `src/textures.js` for procedural canvas textures and materials, and `src/geometry.js` for static batching helpers.
 - `src/weapons.js`, `src/characters.js` and `src/props.js` build the weapon models and first-person arms, the character rigs (IK arms) and the throwable props with their physics.
+- `src/graphics.js` owns the office reflection stage, quality-scaled AO and render pixel budgets.
 - `src/fx.js` and `src/audio.js` provide the effects and procedural WebAudio sound.
 - `src/survival.js` defines supply balance, spawn locations, grenade physics and cover intersection. `src/supplies.js` builds loot models and bounded tactical smoke.
 - `src/hud.js` draws the CS-style HUD: radar, kill feed, scoreboard and damage indicators.
@@ -99,7 +127,16 @@ npm test
 npm start
 ```
 
-`npm test` runs module syntax checks, host-authority tests and Playwright gameplay tests against a mocked PeerJS broker. Coverage includes existing movement/props/multiplayer, armor, healing/boost, grenade physics and cover, smoke lifetime, new weapons, and late joins. Browser tests use a pinned local copy of Three.js, so CDN outages do not affect the results. Production still uses the static import map.
+`npm test` runs module syntax checks, host-authority tests and Playwright gameplay tests against a mocked PeerJS broker. Coverage includes existing movement/props/multiplayer, armor, healing/boost, grenade physics and cover, smoke lifetime, new weapons, and late joins. Browser tests use a pinned local copy of Three.js, so CDN outages do not affect the results. Production still uses the static import map. Graphics regressions additionally cover all
+four presets, high-DPI resize, scope/FOV projection, smoke/transparency preservation,
+mobile controls, material-map caching, and render budgets. The pull-request workflow
+runs the suite and retains `game-test-results` for seven days, including matched-camera
+before/after office and kitchen screenshots when a PR base commit is available.
+Screenshots are review evidence, not pixel-perfect golden-image assertions.
+
+If Chromium is already installed in a constrained development environment, set
+`PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH` to its executable path. Otherwise use the pinned
+Playwright browser installation above.
 
 To play locally, double-click `play-local.cmd` (Windows), or run the command below. Opening `index.html` directly from disk does not work: browsers block ES modules on `file://` pages.
 

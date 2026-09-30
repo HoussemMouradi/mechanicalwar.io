@@ -46,136 +46,151 @@ function noise(ctx, w, h, amount, seed = 1, mono = true) {
   ctx.putImageData(img, 0, 0);
 }
 
-function blotches(ctx, w, h, count, color, maxR, seed) {
-  const r = rand(seed);
-  for (let i = 0; i < count; i++) {
-    const x = r() * w, y = r() * h, rad = maxR * (0.3 + r());
-    const g = ctx.createRadialGradient(x, y, 0, x, y, rad);
-    g.addColorStop(0, color);
-    g.addColorStop(1, 'rgba(0,0,0,0)');
-    ctx.fillStyle = g;
-    ctx.fillRect(x - rad, y - rad, rad * 2, rad * 2);
+// Periodic value noise has no hard boundary when a material repeats across a
+// floor or a desk. The small grids are only retained while building the maps.
+function noiseField(size, cellsX, cellsY, seed) {
+  const r = rand(seed), grid = new Float32Array(cellsX * cellsY);
+  for (let i = 0; i < grid.length; i++) grid[i] = r();
+  const result = new Float32Array(size * size);
+  for (let y = 0; y < size; y++) {
+    const gy = y / size * cellsY, iy = Math.floor(gy), fy = gy - iy;
+    const sy = fy * fy * (3 - 2 * fy);
+    for (let x = 0; x < size; x++) {
+      const gx = x / size * cellsX, ix = Math.floor(gx), fx = gx - ix;
+      const sx = fx * fx * (3 - 2 * fx);
+      const a = grid[iy * cellsX + ix], b = grid[iy * cellsX + (ix + 1) % cellsX];
+      const c = grid[(iy + 1) % cellsY * cellsX + ix], d = grid[(iy + 1) % cellsY * cellsX + (ix + 1) % cellsX];
+      result[y * size + x] = (a + (b - a) * sx) * (1 - sy) + (c + (d - c) * sx) * sy;
+    }
   }
+  return result;
+}
+
+const SURFACES = {
+  carpet: { size: 512, meters: 2, color: [102, 104, 98], roughness: 0.96, relief: 0.005, seed: 7 },
+  ceiling: { size: 256, meters: 1.2, color: [210, 208, 202], roughness: 0.94, relief: 0.003, seed: 11 },
+  drywall: { size: 512, meters: 2.5, color: [203, 200, 187], roughness: 0.86, relief: 0.001, seed: 9 },
+  paintBlue: { size: 256, meters: 2, color: [43, 64, 88], roughness: 0.76, relief: 0.0008, seed: 4 },
+  wood: { size: 512, meters: 1.6, color: [166, 120, 79], roughness: 0.48, relief: 0.0015, seed: 21 },
+  concrete: { size: 512, meters: 4, color: [139, 141, 143], roughness: 0.86, relief: 0.006, seed: 31 },
+  tiles: { size: 512, meters: 1.2, color: [224, 223, 215], roughness: 0.3, relief: 0.004, seed: 41 },
+  fabric: { size: 256, meters: 0.8, color: [91, 101, 115], roughness: 0.95, relief: 0.0018, seed: 51 },
+  metal: { size: 256, meters: 1, color: [128, 136, 144], roughness: 0.38, relief: 0.001, seed: 61 },
+};
+
+// Colour, relief and roughness describe the same physical features, but are not
+// derived from one another. A dark tile is just as high as a light tile; polished
+// ceramic is smooth while its grout is rough. No downloaded assets are needed.
+function makeSurface(kind) {
+  const p = SURFACES[kind], { size, meters } = p, tau = Math.PI * 2;
+  const [canvas, ctx] = makeCanvas(size, size);
+  const [heightCanvas, heightCtx] = makeCanvas(size, size);
+  const [roughCanvas, roughCtx] = makeCanvas(size, size);
+  const color = ctx.createImageData(size, size), height = heightCtx.createImageData(size, size);
+  const rough = roughCtx.createImageData(size, size);
+  const broad = noiseField(size, 8, 8, p.seed), fine = noiseField(size, 128, 128, p.seed + 1);
+  const brush = kind === 'metal' ? noiseField(size, 4, 128, p.seed + 2) : null;
+  const r = rand(p.seed + 3);
+  for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) {
+    const index = y * size + x, i = index * 4, u = x / size, v = y / size;
+    const cloud = broad[index] - 0.5, grain = fine[index] - 0.5, speckle = r() - 0.5;
+    let shade = cloud * 7 + speckle * 5, h = 0.5, roughness = p.roughness;
+    let red = p.color[0], green = p.color[1], blue = p.color[2];
+    if (kind === 'carpet') {
+      const tileSize = size / 4, tx = Math.floor(x / tileSize), ty = Math.floor(y / tileSize);
+      const quarterTurn = (tx + ty) % 2, across = quarterTurn ? y : x, along = quarterTurn ? x : y;
+      const rib = Math.cos(across * tau / 4), loop = Math.sin(along * tau / 8 + rib * 0.7);
+      const edge = Math.min(x % tileSize, tileSize - x % tileSize, y % tileSize, tileSize - y % tileSize);
+      const seam = 1 - THREE.MathUtils.smoothstep(edge, 0, 1.5);
+      shade = cloud * 8 + grain * 7 + speckle * 12 + rib * 2 + quarterTurn * 2 - seam * 9;
+      h = 0.56 + rib * 0.08 + loop * 0.04 + grain * 0.08 + speckle * 0.08 - seam * 0.2;
+      roughness += cloud * 0.03 + grain * 0.02;
+    } else if (kind === 'wood') {
+      const warp = v + Math.sin(u * tau) * 0.009 + Math.sin((u * 3 + v) * tau) * 0.003;
+      const growth = Math.sin(warp * tau * 42 + cloud * 2.4);
+      const pore = Math.pow(Math.max(0, Math.sin(warp * tau * 86 + cloud * 3)), 12);
+      const worn = Math.max(0, cloud + 0.1);
+      shade = growth * 5 - pore * 10 + cloud * 18 + speckle * 3;
+      h = 0.58 - pore * 0.18 + grain * 0.04 + speckle * 0.025;
+      roughness += pore * 0.045 + worn * 0.14 + grain * 0.025 - 0.025;
+    } else if (kind === 'concrete') {
+      const panel = size / 2, edge = Math.min(x % panel, panel - x % panel, y % panel, panel - y % panel);
+      const joint = 1 - THREE.MathUtils.smoothstep(edge, 0, 2);
+      const pore = Math.max(0, -grain - 0.17) * 2.5;
+      shade = cloud * 22 + grain * 9 + speckle * 12 - joint * 23 - pore * 14;
+      h = 0.58 + grain * 0.08 + speckle * 0.045 - pore * 0.3 - joint * 0.32;
+      roughness += cloud * 0.08 + pore * 0.12 + joint * 0.07;
+    } else if (kind === 'tiles') {
+      const tileSize = size / 4, tx = Math.floor(x / tileSize), ty = Math.floor(y / tileSize);
+      const edge = Math.min(x % tileSize, tileSize - x % tileSize, y % tileSize, tileSize - y % tileSize);
+      const face = THREE.MathUtils.smoothstep(edge, 1.5, 4);
+      const dark = (tx + ty) % 2 === 0, tileTone = Math.sin(tx * 7 + ty * 13) * 2;
+      red = THREE.MathUtils.lerp(130, dark ? 76 : 224, face);
+      green = THREE.MathUtils.lerp(134, dark ? 84 : 223, face);
+      blue = THREE.MathUtils.lerp(131, dark ? 88 : 215, face);
+      shade = cloud * 4 + speckle * (1 - face) * 11 + tileTone * face;
+      h = 0.22 + face * 0.62 + speckle * 0.018 * (1 - face);
+      roughness = THREE.MathUtils.lerp(0.88 + grain * 0.08, p.roughness + cloud * 0.055, face);
+    } else if (kind === 'metal') {
+      const brushed = brush[index] - 0.5;
+      const scuff = Math.max(0, cloud - 0.16) * 2;
+      shade = brushed * 13 + speckle * 3 + cloud * 4 + scuff * 3;
+      h = 0.5 + brushed * 0.09 + speckle * 0.02;
+      roughness += brushed * 0.16 + scuff * 0.16;
+    } else if (kind === 'fabric') {
+      const warp = Math.cos(x * tau / 4), weft = Math.cos(y * tau / 4);
+      const over = (Math.floor(x / 4) + Math.floor(y / 4)) % 2;
+      const weave = over ? warp * 0.7 + weft * 0.3 : warp * 0.3 + weft * 0.7;
+      shade = weave * 4 + cloud * 6 + speckle * 9;
+      h = 0.5 + weave * 0.13 + speckle * 0.045;
+      roughness += grain * 0.035;
+    } else if (kind === 'ceiling') {
+      const panel = size / 2, edge = Math.min(x % panel, panel - x % panel, y % panel, panel - y % panel);
+      const rail = 1 - THREE.MathUtils.smoothstep(edge, 2, 3.5);
+      const pore = Math.max(0, -grain - 0.1) * 1.8;
+      shade = cloud * 5 + speckle * 5 - pore * 28 - rail * 20;
+      h = 0.5 - pore * 0.25 + rail * 0.3 + speckle * 0.02;
+      roughness -= rail * 0.14;
+    } else {
+      // Paint stipple is shallow; stains affect colour/roughness, not wall shape.
+      h = 0.5 + grain * 0.16 + speckle * 0.05;
+      roughness += cloud * 0.055 + grain * 0.035;
+    }
+    color.data[i] = red + shade; color.data[i + 1] = green + shade; color.data[i + 2] = blue + shade; color.data[i + 3] = 255;
+    height.data[i] = height.data[i + 1] = height.data[i + 2] = THREE.MathUtils.clamp(h, 0, 1) * 255;
+    rough.data[i] = rough.data[i + 1] = rough.data[i + 2] = THREE.MathUtils.clamp(roughness, 0.04, 1) * 255;
+    height.data[i + 3] = rough.data[i + 3] = 255;
+  }
+  ctx.putImageData(color, 0, 0); heightCtx.putImageData(height, 0, 0); roughCtx.putImageData(rough, 0, 0);
+  const t = toTexture(canvas), heightMap = toTexture(heightCanvas, { srgb: false }), roughMap = toTexture(roughCanvas, { srgb: false });
+  t.userData = { meters, surface: kind, reliefMeters: p.relief, roughness: p.roughness };
+  heightMap.userData.meters = roughMap.userData.meters = meters;
+  cache.set('bump:' + t.uuid, heightMap);
+  cache.set('surfaceRough:' + t.uuid, roughMap);
+  return t;
 }
 
 // Each texture reports `meters`: the world size covered by one repeat, used by world-space UVs.
 export const TEX = {
-  carpet: () => cached('carpet', () => {
-    const [c, x] = makeCanvas(512, 512);
-    x.fillStyle = '#666762'; x.fillRect(0, 0, 512, 512);
-    for (let i = 0; i < 4; i++) for (let j = 0; j < 4; j++) {
-      x.fillStyle = (i + j) % 2 ? '#686a66' : '#62645f';
-      x.fillRect(i * 128, j * 128, 128, 128);
-      x.strokeStyle = 'rgba(0,0,0,.22)'; x.lineWidth = 1.5;
-      for (let k = 0; k < 128; k += 5) {
-        x.beginPath();
-        if ((i + j) % 2) { x.moveTo(i * 128 + k, j * 128); x.lineTo(i * 128 + k, j * 128 + 128); }
-        else { x.moveTo(i * 128, j * 128 + k); x.lineTo(i * 128 + 128, j * 128 + k); }
-        x.stroke();
-      }
-    }
-    noise(x, 512, 512, 31, 7);
-    blotches(x, 512, 512, 18, 'rgba(20,20,30,.10)', 60, 3);
-    x.strokeStyle = 'rgba(0,0,0,.19)'; x.lineWidth = 1;
-    for (let p = 0; p <= 512; p += 128) { x.beginPath(); x.moveTo(p, 0); x.lineTo(p, 512); x.stroke(); x.beginPath(); x.moveTo(0, p); x.lineTo(512, p); x.stroke(); }
-    const t = toTexture(c); t.userData.meters = 2; return t;
-  }),
-
-  ceiling: () => cached('ceiling', () => {
-    const [c, x] = makeCanvas(256, 256);
-    x.fillStyle = '#d2d0ca'; x.fillRect(0, 0, 256, 256);
-    const r = rand(11);
-    for (let i = 0; i < 2600; i++) { x.fillStyle = `rgba(90,90,80,${0.08 + r() * 0.2})`; x.fillRect(r() * 256, r() * 256, 1.5, 1.5); }
-    x.fillStyle = '#b9b7b0';
-    for (let p = 0; p <= 256; p += 128) { x.fillRect(p - 3, 0, 6, 256); x.fillRect(0, p - 3, 256, 6); }
-    const t = toTexture(c); t.userData.meters = 1.2; return t;
-  }),
-
-  drywall: () => cached('drywall', () => {
-    const [c, x] = makeCanvas(512, 512);
-    x.fillStyle = '#cbc8bb'; x.fillRect(0, 0, 512, 512);
-    blotches(x, 512, 512, 45, 'rgba(110,100,80,.055)', 90, 5);
-    noise(x, 512, 512, 11, 9);
-    const r = rand(10);
-    x.strokeStyle = 'rgba(80,75,63,.07)'; x.lineWidth = 0.8;
-    for (let i = 0; i < 70; i++) {
-      const px = r() * 512, py = r() * 512;
-      x.beginPath(); x.moveTo(px, py); x.lineTo(px + r() * 12, py + r() * 2); x.stroke();
-    }
-    const t = toTexture(c); t.userData.meters = 2.5; return t;
-  }),
-
-  paintBlue: () => cached('paintBlue', () => {
-    const [c, x] = makeCanvas(256, 256);
-    x.fillStyle = '#2b4058'; x.fillRect(0, 0, 256, 256);
-    noise(x, 256, 256, 10, 4);
-    const t = toTexture(c); t.userData.meters = 2; return t;
-  }),
-
-  wood: () => cached('wood', () => {
-    const [c, x] = makeCanvas(512, 512);
-    x.fillStyle = '#a8784c'; x.fillRect(0, 0, 512, 512);
-    const r = rand(21);
-    for (let i = 0; i < 180; i++) {
-      const y = r() * 512, amp = 2 + r() * 6, freq = 0.005 + r() * 0.02, ph = r() * 6;
-      x.strokeStyle = `rgba(${60 + r() * 40},${35 + r() * 20},${15},${0.08 + r() * 0.18})`;
-      x.lineWidth = 0.6 + r() * 2.2;
-      x.beginPath();
-      for (let px = 0; px <= 512; px += 8) x.lineTo(px, y + Math.sin(px * freq + ph) * amp);
-      x.stroke();
-    }
-    noise(x, 512, 512, 14, 22);
-    const t = toTexture(c); t.userData.meters = 1.6; return t;
-  }),
-
+  carpet: () => cached('carpet', () => makeSurface('carpet')),
+  ceiling: () => cached('ceiling', () => makeSurface('ceiling')),
+  drywall: () => cached('drywall', () => makeSurface('drywall')),
+  paintBlue: () => cached('paintBlue', () => makeSurface('paintBlue')),
+  wood: () => cached('wood', () => makeSurface('wood')),
   darkWood: () => cached('darkWood', () => {
-    const [c, x] = makeCanvas(512, 512);
-    x.drawImage(TEX.wood().image, 0, 0);
+    const source = TEX.wood(), [c, x] = makeCanvas(512, 512);
+    x.drawImage(source.image, 0, 0);
     x.fillStyle = 'rgba(40,18,8,.62)'; x.fillRect(0, 0, 512, 512);
-    const t = toTexture(c); t.userData.meters = 1.6; return t;
+    const t = toTexture(c); t.userData = { ...source.userData };
+    // Dark stain changes the albedo, not the grain's shape or its finish.
+    cache.set('bump:' + t.uuid, bumpOf(source));
+    cache.set('surfaceRough:' + t.uuid, cache.get('surfaceRough:' + source.uuid));
+    return t;
   }),
-
-  concrete: () => cached('concrete', () => {
-    const [c, x] = makeCanvas(512, 512);
-    x.fillStyle = '#8b8d8f'; x.fillRect(0, 0, 512, 512);
-    blotches(x, 512, 512, 60, 'rgba(60,60,60,.12)', 70, 31);
-    blotches(x, 512, 512, 40, 'rgba(200,200,200,.08)', 50, 32);
-    noise(x, 512, 512, 34, 33);
-    x.strokeStyle = 'rgba(40,40,40,.4)'; x.lineWidth = 2;
-    x.beginPath(); x.moveTo(0, 256); x.lineTo(512, 256); x.moveTo(256, 0); x.lineTo(256, 512); x.stroke();
-    const t = toTexture(c); t.userData.meters = 4; return t;
-  }),
-
-  tiles: () => cached('tiles', () => {
-    const [c, x] = makeCanvas(256, 256);
-    x.fillStyle = '#9ca3a8'; x.fillRect(0, 0, 256, 256);
-    const r = rand(41);
-    for (let i = 0; i < 4; i++) for (let j = 0; j < 4; j++) {
-      const v = 222 + r() * 16 | 0;
-      x.fillStyle = (i + j) % 2 ? `rgb(${v},${v},${v - 4})` : `rgb(${v - 150},${v - 146},${v - 140})`;
-      x.fillRect(i * 64 + 2, j * 64 + 2, 60, 60);
-    }
-    noise(x, 256, 256, 10, 42);
-    const t = toTexture(c); t.userData.meters = 1.2; return t;
-  }),
-
-  fabric: () => cached('fabric', () => {
-    const [c, x] = makeCanvas(256, 256);
-    x.fillStyle = '#5b6573'; x.fillRect(0, 0, 256, 256);
-    x.strokeStyle = 'rgba(0,0,0,.16)';
-    for (let p = 0; p < 256; p += 3) { x.beginPath(); x.moveTo(p, 0); x.lineTo(p, 256); x.stroke(); x.beginPath(); x.moveTo(0, p); x.lineTo(256, p); x.stroke(); }
-    noise(x, 256, 256, 26, 51);
-    const t = toTexture(c); t.userData.meters = 0.8; return t;
-  }),
-
-  metal: () => cached('metal', () => {
-    const [c, x] = makeCanvas(256, 256);
-    x.fillStyle = '#808890'; x.fillRect(0, 0, 256, 256);
-    const r = rand(61);
-    for (let i = 0; i < 400; i++) { x.fillStyle = `rgba(255,255,255,${r() * 0.06})`; x.fillRect(0, r() * 256, 256, 1); }
-    noise(x, 256, 256, 18, 62);
-    const t = toTexture(c); t.userData.meters = 1; return t;
-  }),
+  concrete: () => cached('concrete', () => makeSurface('concrete')),
+  tiles: () => cached('tiles', () => makeSurface('tiles')),
+  fabric: () => cached('fabric', () => makeSurface('fabric')),
+  metal: () => cached('metal', () => makeSurface('metal')),
 
   // Small, reusable surface details keep the office self-contained and inexpensive.
   lightLens: () => cached('lightLens', () => {
@@ -389,8 +404,8 @@ export const TEX = {
   }),
 };
 
-// Height and roughness are data maps, never sRGB colour. Millimetre-scale bump
-// amplitudes below retain texture detail without turning carpet into deep ridges.
+// Height, normal and roughness maps are linear data, never sRGB colour. The
+// grayscale fallback keeps bumpOf useful for non-surface textures and decals.
 export function bumpOf(tex) {
   return cached('bump:' + tex.uuid, () => {
     const [c, ctx] = makeCanvas(tex.image.width, tex.image.height);
@@ -401,23 +416,59 @@ export function bumpOf(tex) {
       img.data[i] = img.data[i + 1] = img.data[i + 2] = value;
     }
     ctx.putImageData(img, 0, 0);
-    const t = toTexture(c, { srgb: false });
+    const t = toTexture(c, { srgb: false, repeat: tex.wrapS === THREE.RepeatWrapping });
+    t.userData.meters = tex.userData.meters;
+    return t;
+  });
+}
+
+export function normalOf(tex) {
+  return cached('normal:' + tex.uuid, () => {
+    const height = bumpOf(tex).image, w = height.width, h = height.height;
+    const data = height.getContext('2d').getImageData(0, 0, w, h).data;
+    const [c, ctx] = makeCanvas(w, h), img = ctx.createImageData(w, h);
+    const repeat = tex.wrapS === THREE.RepeatWrapping;
+    const relief = tex.userData.reliefMeters ?? 0.001;
+    const scaleX = relief * w / (tex.userData.meters || 1) / 2;
+    const scaleY = relief * h / (tex.userData.meters || 1) / 2;
+    const sample = (x, y) => {
+      const sx = repeat ? (x + w) % w : THREE.MathUtils.clamp(x, 0, w - 1);
+      const sy = repeat ? (y + h) % h : THREE.MathUtils.clamp(y, 0, h - 1);
+      return data[(sy * w + sx) * 4] / 255;
+    };
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+      const dx = (sample(x + 1, y) - sample(x - 1, y)) * scaleX;
+      const dy = (sample(x, y + 1) - sample(x, y - 1)) * scaleY;
+      const length = Math.hypot(dx, dy, 1), i = (y * w + x) * 4;
+      // Canvas Y runs downwards; the flipped texture's tangent V runs up.
+      img.data[i] = (0.5 - dx / length * 0.5) * 255;
+      img.data[i + 1] = (0.5 + dy / length * 0.5) * 255;
+      img.data[i + 2] = (0.5 + 1 / length * 0.5) * 255;
+      img.data[i + 3] = 255;
+    }
+    ctx.putImageData(img, 0, 0);
+    const t = toTexture(c, { srgb: false, repeat });
     t.userData.meters = tex.userData.meters;
     return t;
   });
 }
 
 function roughnessOf(tex, base, variation = 0.15) {
-  return cached(`rough:${tex.uuid}:${base}`, () => {
+  const profile = cache.get('surfaceRough:' + tex.uuid);
+  if (profile && base === tex.userData.roughness) return profile;
+  return cached(`rough:${tex.uuid}:${base}:${variation}`, () => {
     const [c, ctx] = makeCanvas(tex.image.width, tex.image.height);
-    ctx.drawImage(bumpOf(tex).image, 0, 0);
+    ctx.drawImage((profile || bumpOf(tex)).image, 0, 0);
     const img = ctx.getImageData(0, 0, c.width, c.height);
     for (let i = 0; i < img.data.length; i += 4) {
-      const value = THREE.MathUtils.clamp(base + (img.data[i] / 255 - 0.5) * variation, 0, 1) * 255;
+      const sampled = img.data[i] / 255;
+      const value = THREE.MathUtils.clamp(profile ? sampled + base - tex.userData.roughness : base + (sampled - 0.5) * variation, 0.04, 1) * 255;
       img.data[i] = img.data[i + 1] = img.data[i + 2] = value;
     }
     ctx.putImageData(img, 0, 0);
-    return toTexture(c, { srgb: false });
+    const t = toTexture(c, { srgb: false, repeat: tex.wrapS === THREE.RepeatWrapping });
+    t.userData.meters = tex.userData.meters;
+    return t;
   });
 }
 
@@ -426,24 +477,24 @@ export function materials() {
   if (lib) return lib;
   const std = (o) => new THREE.MeshStandardMaterial(o);
   const tex = (t, o = {}) => {
-    const m = std({ map: t, ...o, roughnessMap: roughnessOf(t, o.roughness ?? 0.8), roughness: 1 });
+    const m = std({ map: t, normalMap: o.normalMap || normalOf(t), ...o, roughnessMap: roughnessOf(t, o.roughness ?? 0.8), roughness: 1 });
     m.userData.meters = t.userData.meters || 1;
     return m;
   };
   lib = {
-    carpet: tex(TEX.carpet(), { roughness: 0.96, bumpMap: bumpOf(TEX.carpet()), bumpScale: 0.025 }),
-    ceiling: tex(TEX.ceiling(), { roughness: 0.94, bumpMap: bumpOf(TEX.ceiling()), bumpScale: 0.015 }),
-    drywall: tex(TEX.drywall(), { roughness: 0.86, bumpMap: bumpOf(TEX.drywall()), bumpScale: 0.008 }),
-    accentWall: tex(TEX.paintBlue(), { roughness: 0.76, bumpMap: bumpOf(TEX.paintBlue()), bumpScale: 0.006 }),
-    wood: tex(TEX.wood(), { roughness: 0.48, metalness: 0, bumpMap: bumpOf(TEX.wood()), bumpScale: 0.006 }),
-    darkWood: tex(TEX.darkWood(), { roughness: 0.46, bumpMap: bumpOf(TEX.wood()), bumpScale: 0.006 }),
-    concrete: tex(TEX.concrete(), { roughness: 0.86, bumpMap: bumpOf(TEX.concrete()), bumpScale: 0.025 }),
-    tiles: tex(TEX.tiles(), { roughness: 0.3, bumpMap: bumpOf(TEX.tiles()), bumpScale: 0.008 }),
-    fabric: tex(TEX.fabric(), { roughness: 0.95, bumpMap: bumpOf(TEX.fabric()), bumpScale: 0.012 }),
+    carpet: tex(TEX.carpet(), { roughness: 0.96 }),
+    ceiling: tex(TEX.ceiling(), { roughness: 0.94 }),
+    drywall: tex(TEX.drywall(), { roughness: 0.86 }),
+    accentWall: tex(TEX.paintBlue(), { roughness: 0.76 }),
+    wood: tex(TEX.wood(), { roughness: 0.48, metalness: 0 }),
+    darkWood: tex(TEX.darkWood(), { roughness: 0.46, normalMap: normalOf(TEX.wood()) }),
+    concrete: tex(TEX.concrete(), { roughness: 0.86 }),
+    tiles: tex(TEX.tiles(), { roughness: 0.3 }),
+    fabric: tex(TEX.fabric(), { roughness: 0.95 }),
     fabricOrange: tex(TEX.fabric(), { roughness: 1, color: 0xffb070 }),
     fabricBlue: tex(TEX.fabric(), { roughness: 1, color: 0x9cc3ff }),
-    metal: tex(TEX.metal(), { roughness: 0.38, metalness: 0.78, bumpMap: bumpOf(TEX.metal()), bumpScale: 0.003 }),
-    darkMetal: std({ color: 0x343b3b, roughness: 0.53, metalness: 0.6, roughnessMap: roughnessOf(TEX.metal(), 0.8) }),
+    metal: tex(TEX.metal(), { roughness: 0.38, metalness: 0.85 }),
+    darkMetal: std({ color: 0x343b3b, roughness: 1, metalness: 0.6, normalMap: normalOf(TEX.metal()), roughnessMap: roughnessOf(TEX.metal(), 0.53) }),
     blackPlastic: std({ color: 0x15171b, roughness: 0.55, metalness: 0.05 }),
     greyPlastic: std({ color: 0x9aa0a8, roughness: 0.6, metalness: 0.05 }),
     whitePlastic: std({ color: 0xe8e8e4, roughness: 0.5, metalness: 0 }),

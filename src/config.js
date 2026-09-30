@@ -111,10 +111,10 @@ export const PROPS = {
 };
 
 export const QUALITY = {
-  low: { label: 'Low', pixelRatio: 0.75, shadows: false, shadowSize: 0, post: false, lights: 4, aa: false },
-  medium: { label: 'Medium', pixelRatio: 1, shadows: true, shadowSize: 1024, post: false, lights: 8, aa: true },
-  high: { label: 'High', pixelRatio: 1.25, shadows: true, shadowSize: 2048, post: true, lights: 12, aa: true },
-  ultra: { label: 'Ultra', pixelRatio: 2, shadows: true, shadowSize: 4096, post: true, lights: 16, aa: true },
+  low: { label: 'Low', pixelRatio: 0.75, maxPixels: 1600000, shadows: false, shadowSize: 0, post: false, lights: 4, aa: false, anisotropy: 2 },
+  medium: { label: 'Medium', pixelRatio: 1, maxPixels: 2400000, shadows: true, shadowSize: 1024, post: false, lights: 8, aa: true, anisotropy: 4 },
+  high: { label: 'High', pixelRatio: 1.25, maxPixels: 3600000, shadows: true, shadowSize: 2048, post: true, lights: 12, aa: true, anisotropy: 8, aoScale: 0.5, aoSamples: 16 },
+  ultra: { label: 'Ultra', pixelRatio: 2, maxPixels: 6000000, shadows: true, shadowSize: 4096, post: true, lights: 16, aa: true, anisotropy: 16, aoScale: 0.75, aoSamples: 32 },
 };
 
 const SETTINGS_KEY = 'mw.settings.v4';
