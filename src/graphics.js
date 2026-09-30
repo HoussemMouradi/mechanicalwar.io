@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { SSAOPass } from 'three/addons/postprocessing/SSAOPass.js';
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 
 // Budget physical pixels, not CSS pixels. In particular, a 4K/retina display
 // must not quietly allocate a second DPR multiplier in every postprocess pass.
@@ -36,12 +37,47 @@ export function createOfficeEnvironment(renderer) {
   }
 }
 
+// Transparency is drawn after AO, against the original opaque depth buffer.
+// Hiding materials (not parent objects) also preserves transparent child meshes
+// and mixed-material models without changing multiplayer visibility state.
+export class OfficeWorldPass extends RenderPass {
+  constructor(scene, camera, transparent = false) {
+    super(scene, camera);
+    this.transparentOnly = transparent;
+    this.clear = !transparent;
+  }
+
+  render(renderer, ...args) {
+    const visibility = new Map(), background = this.scene.background;
+    const shadowUpdate = renderer.shadowMap.autoUpdate;
+    this.scene.traverse(object => {
+      const materials = Array.isArray(object.material) ? object.material : [object.material];
+      for (const material of materials) if (material && !visibility.has(material)) {
+        visibility.set(material, material.visible);
+        material.visible = material.visible && material.transparent === this.transparentOnly;
+      }
+    });
+    if (this.transparentOnly) {
+      this.scene.background = null; // a Color background otherwise force-clears
+      renderer.shadowMap.autoUpdate = false;
+    }
+    try {
+      super.render(renderer, ...args);
+    } finally {
+      for (const [material, visible] of visibility) material.visible = visible;
+      this.scene.background = background;
+      renderer.shadowMap.autoUpdate = shadowUpdate;
+    }
+  }
+}
+
 // Only the world receives AO: the viewmodel and HUD are composed afterwards.
 // Half-resolution High and bounded Ultra avoid paying full 4K SSAO cost.
 export class OfficeAOPass extends SSAOPass {
   constructor(scene, camera, quality) {
     super(scene, camera, 1, 1, quality.aoSamples);
     this.resolutionScale = quality.aoScale;
+    this.needsSwap = false;
     this.maxDimension = 1600;
     this.kernelRadius = 0.65; // metres: contact detail, not a dark room-sized halo
     this.minDistance = 0.008 / (camera.far - camera.near);
@@ -74,13 +110,24 @@ export class OfficeAOPass extends SSAOPass {
     // The world pass already updated dynamic shadows. Don't draw them twice.
     const autoUpdate = renderer.shadowMap.autoUpdate;
     renderer.shadowMap.autoUpdate = false;
+    this.beautyTexture = readBuffer.texture;
     try {
-      super.render(renderer, writeBuffer, readBuffer, ...args);
+      // Multiply AO directly into the opaque color buffer, preserving its depth
+      // for the subsequent transparent-world pass. No sampling of this buffer.
+      super.render(renderer, readBuffer, readBuffer, ...args);
     } finally {
+      this.beautyTexture = null;
       renderer.shadowMap.autoUpdate = autoUpdate;
       if (this._visibilityCache.size) this.restoreVisibility();
       this.scene.overrideMaterial = null;
     }
+  }
+
+  renderPass(renderer, material, target, ...args) {
+    // Default SSAOPass first copies beauty to a second target. Skip that copy:
+    // the destination already contains beauty, and self-sampling is invalid.
+    if (material === this.copyMaterial && material.uniforms.tDiffuse.value === this.beautyTexture) return;
+    super.renderPass(renderer, material, target, ...args);
   }
 
   dispose() {

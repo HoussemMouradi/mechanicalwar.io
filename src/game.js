@@ -19,7 +19,7 @@ import { setAnisotropy } from './textures.js';
 import { TouchControls, isTouchDevice } from './touch.js';
 import { SUPPLIES } from './survival.js';
 import { buildSupply, disposeSupply, SmokeEffects } from './supplies.js';
-import { createOfficeEnvironment, OfficeAOPass, renderPixelRatio } from './graphics.js';
+import { createOfficeEnvironment, OfficeAOPass, OfficeWorldPass, renderPixelRatio } from './graphics.js';
 
 const RADIUS = 0.3, STAND_H = 1.8, CROUCH_H = 1.25, EYE_STAND = 1.64, EYE_CROUCH = 1.12;
 const GRAVITY = 20, JUMP_V = 6.6, STEP = 0.36, RUN_SPEED = 6.0;
@@ -131,9 +131,10 @@ export class Game {
     if (q.post && this.renderer.capabilities.isWebGL2 && this.renderer.extensions.has('EXT_color_buffer_float')) {
       const rt = new THREE.WebGLRenderTarget(innerWidth, innerHeight, { type: THREE.HalfFloatType, samples: Math.min(4, this.renderer.capabilities.maxSamples) });
       this.composer = new EffectComposer(this.renderer, rt);
-      this.composer.addPass(new RenderPass(this.scene, this.camera));
+      this.composer.addPass(new OfficeWorldPass(this.scene, this.camera));
       this.aoPass = new OfficeAOPass(this.scene, this.camera, q);
       this.composer.addPass(this.aoPass);
+      this.composer.addPass(new OfficeWorldPass(this.scene, this.camera, true));
       // Bloom belongs to bright fixtures/screens, before hands and gun are drawn.
       this.composer.addPass(new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.12, 0.45, 1.05));
       const vp = new RenderPass(this.viewScene, this.viewCamera);

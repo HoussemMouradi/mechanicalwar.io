@@ -48,7 +48,7 @@ for (const quality of ['low', 'medium', 'high', 'ultra']) {
       expect(before.ao).toEqual(before.canvas.map(size => Math.round(size * before.scale)));
     }
     await page.setViewportSize({ width: 760, height: 420 });
-    const state = await page.evaluate(() => {
+    const state = await page.evaluate(async () => {
       const g = window.mw.game;
       g.onResize(); g.applySettings({ ...g.settings, fov: 22 });
       g.smokeEffects.add('graphics-smoke', [0, 0, 0], 4.5, 16);
@@ -66,10 +66,32 @@ for (const quality of ['low', 'medium', 'high', 'ultra']) {
       const gl = g.renderer.getContext();
       gl.readPixels(0, 0, ...sizes, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
       let lit = 0; for (let i = 0; i < pixels.length; i += 4) if (pixels[i] + pixels[i + 1] + pixels[i + 2] > 50) lit++;
+      let transparencyUnaffected = true;
+      if (g.aoPass) {
+        // A fully dense transparent surface must not inherit background AO.
+        // Force a dark AO texture to make this regression independent of scene
+        // geometry, random SSAO samples and the software GPU's edge precision.
+        const THREE = await import('three');
+        const overlay = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), new THREE.MeshBasicMaterial({ color: 0xff2020, transparent: true, opacity: 1 }));
+        overlay.position.copy(g.camera.position).addScaledVector(g.camera.getWorldDirection(new THREE.Vector3()), 0.25);
+        overlay.quaternion.copy(g.camera.quaternion); g.scene.add(overlay);
+        const sample = () => { const p = new Uint8Array(4); g.render(); gl.readPixels(Math.floor(sizes[0] / 2), Math.floor(sizes[1] / 2), 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, p); return p; };
+        g.aoPass.enabled = false;
+        const original = sample();
+        g.aoPass.enabled = true;
+        const shader = g.aoPass.blurMaterial.fragmentShader;
+        g.aoPass.blurMaterial.fragmentShader = 'void main() { gl_FragColor = vec4(0.2, 0.2, 0.2, 1.0); }';
+        g.aoPass.blurMaterial.needsUpdate = true;
+        const withAO = sample();
+        transparencyUnaffected = original.every((v, i) => Math.abs(v - withAO[i]) <= 1);
+        g.aoPass.blurMaterial.fragmentShader = shader; g.aoPass.blurMaterial.needsUpdate = true;
+        g.scene.remove(overlay); overlay.geometry.dispose(); overlay.material.dispose();
+      }
       g.smokeEffects.clear();
       g.applySettings({ ...g.settings, fov: 80 }); g.render();
-      return { projection, restored, cloud: !!cloud, shadows: g.renderer.shadowMap.autoUpdate, passes, sizes, target, lit, error: gl.getError() };
+      return { transparencyUnaffected, projection, restored, cloud: !!cloud, shadows: g.renderer.shadowMap.autoUpdate, passes, sizes, target, lit, error: gl.getError() };
     });
+    expect(state.transparencyUnaffected).toBe(true);
     expect(state.projection).toBe(true);
     expect(state.restored).toBe(true);
     expect(state.cloud).toBe(true);
@@ -78,7 +100,7 @@ for (const quality of ['low', 'medium', 'high', 'ultra']) {
     expect(state.error).toBe(0);
     if (before.post) {
       expect(state.target).toEqual(state.sizes);
-      expect(state.passes).toEqual(['RenderPass', 'OfficeAOPass', 'UnrealBloomPass', 'RenderPass', 'OutputPass']);
+      expect(state.passes).toEqual(['OfficeWorldPass', 'OfficeAOPass', 'OfficeWorldPass', 'UnrealBloomPass', 'RenderPass', 'OutputPass']);
     }
     await page.screenshot({ path: testInfo.outputPath(`${quality}-office.png`) });
     expect(errors).toEqual([]);
