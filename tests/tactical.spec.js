@@ -111,6 +111,7 @@ async function enterOffice(page, { team = 1, char = 'manager', name = 'Tester' }
     // These tests assert input, simulation, model transforms, network and HUD.
     // The dedicated graphics suite submits full frames for every quality preset.
     // Avoid tying real-time gameplay timers to a CI software GPU's frame time.
+    g.renderNow = g.render.bind(g);
     g.render = () => {};
   });
 }
@@ -205,6 +206,7 @@ test('ground armor is equipped with E and HUD follows separate body/head damage'
   expect(head.armor).toBe(body.armor);
   expect(head.helmet).toBeLessThan(body.helmet);
   await expect(page.locator('#helmetVal')).toContainText(String(head.helmet));
+  await page.evaluate(() => window.mw.game.renderNow());
   expect(errors).toEqual([]);
 });
 
@@ -274,6 +276,7 @@ test('H healing can be interrupted and B boosts regenerate without replaying inv
   expect(healed.hp).toBeGreaterThan(boosted.hp);
   expect(healed.boost).toBeLessThan(boosted.boost);
   expect(healed.hp).toBeLessThanOrEqual(100);
+  await page.evaluate(() => window.mw.game.renderNow());
   expect(errors).toEqual([]);
 });
 
@@ -330,6 +333,7 @@ test('F and X throw owned grenades and smoke effects clear after expiry', async 
   await page.evaluate(() => window.mw.game.host.simulateGrenades(16.1));
   await expect.poll(() => page.evaluate(() => window.mw.game.smokeEffects.clouds.size)).toBe(0);
   await expect.poll(() => page.evaluate(() => window.mw.game.grenades.size)).toBe(0);
+  await page.evaluate(() => window.mw.game.renderNow());
   expect(errors).toEqual([]);
 });
 
@@ -358,7 +362,9 @@ test('new rifles and SMGs have ground/view models and reload through R', async (
     });
     await page.keyboard.press('KeyR');
     await expect.poll(() => page.evaluate(() => window.mw.game.wep.reloadT)).toBeGreaterThan(0);
-    // Keep real R-key and reload-start assertions, then advance the same weapon
+    const startedAt = await page.evaluate(() => window.mw.game.wep.reloadT);
+    await expect.poll(() => page.evaluate(() => window.mw.game.wep.reloadT)).toBeLessThan(startedAt);
+    // Keep real R-key, reload-start and automatic-loop progress, then advance the same weapon
     // timer the animation loop uses. Do not wait on software GPU frame pacing.
     await page.evaluate(() => {
       const g = window.mw.game;
@@ -368,6 +374,7 @@ test('new rifles and SMGs have ground/view models and reload through R', async (
     expect(await page.evaluate(() => window.mw.game.me.inv.primary.res)).toBe(before - magazine + 1);
     await expect(page.locator('#ammoVal')).toHaveText(String(magazine));
   }
+  await page.evaluate(() => window.mw.game.renderNow());
   expect(errors).toEqual([]);
 });
 
@@ -413,6 +420,8 @@ test('late joiners receive depleted loot, armor and active smoke from the host',
     g.host.simulateGrenades(0.02);
   });
   await expect.poll(() => joinPage.evaluate(() => window.mw.game.smokeEffects.clouds.size)).toBe(0);
+  await hostPage.evaluate(() => window.mw.game.renderNow());
+  await joinPage.evaluate(() => window.mw.game.renderNow());
   expect(hostErrors).toEqual([]);
   expect(joinErrors).toEqual([]);
 });

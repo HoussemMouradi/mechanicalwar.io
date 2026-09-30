@@ -134,7 +134,8 @@ runs assets/authority, gameplay and graphics in parallel and retains `game-test-
 before/after office and kitchen screenshots when a PR base commit is available.
 Screenshots are review evidence, not pixel-perfect golden-image assertions.
 Gameplay tests retain real input/network/HUD checks but skip repeated GPU draws after
-match startup; graphics tests independently submit full frames. Prop/reload timers
+match startup, then render again after tactical scenarios; graphics tests independently
+submit full frames. Prop/reload timers
 are advanced through the production simulation functions rather than wall-clock
 sleeps, so slow software rendering cannot decide whether a gameplay test passes.
 

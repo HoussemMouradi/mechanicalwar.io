@@ -110,6 +110,7 @@ async function enterOffice(page, { team = 1, char = 'manager', name = 'Tester' }
     // These tests assert input, simulation, model transforms, network and HUD.
     // The dedicated graphics suite submits full frames for every quality preset.
     // Avoid tying real-time gameplay timers to a CI software GPU's frame time.
+    g.renderNow = g.render.bind(g);
     g.render = () => {};
   });
 }
@@ -222,15 +223,23 @@ test('office props can be grabbed and thrown', async ({ page }) => {
     await wait(200);
     const held = g.me.prop?.id === prop.id && g.me.slot === 'prop';
     g.throwProp(1);
+    const flying = g.host.props.get(prop.id), launch = [flying.x, flying.y, flying.z];
+    let automaticProgress = false;
+    for (let n = 0; n < 20 && !automaticProgress; n++) {
+      await wait(50);
+      automaticProgress = Math.hypot(flying.x - launch[0], flying.y - launch[1], flying.z - launch[2]) > 0.01;
+    }
     // Advance real host physics in bounded steps instead of assuming that a
     // software-rendered tab can simulate 2.5 seconds in 2.5 wall-clock seconds.
     for (let frame = 0; frame < 360 && g.host.props.get(prop.id).state === 'fly'; frame++) g.host.simulateProps(1 / 60);
-    return { held, state: prop.state, moved: Math.hypot(prop.x - start.x, prop.z - start.z), stillHolding: !!g.me.prop };
+    return { held, automaticProgress, state: prop.state, moved: Math.hypot(prop.x - start.x, prop.z - start.z), stillHolding: !!g.me.prop };
   });
   expect(result.held).toBe(true);
+  expect(result.automaticProgress).toBe(true);
   expect(result.stillHolding).toBe(false);
   expect(result.state).toBe('rest');
   expect(result.moved).toBeGreaterThan(1.5);
+  await page.evaluate(() => window.mw.game.renderNow());
 });
 
 test('two tabs share the one room: first hosts, second joins and can shoot', async ({ context }) => {
@@ -269,5 +278,7 @@ test('two tabs share the one room: first hosts, second joins and can shoot', asy
     for (let i = 0; i < 4; i++) { g.wep.cd = 0; g.wep.fired = false; g.fire(); await new Promise(r => setTimeout(r, 150)); }
   });
   await expect.poll(() => a.evaluate(() => window.mw.game.me.hp), { timeout: 5000 }).toBeLessThan(100);
+  await a.evaluate(() => window.mw.game.renderNow());
+  await b.evaluate(() => window.mw.game.renderNow());
   expect(errors.all || errors).toEqual([]);
 });
